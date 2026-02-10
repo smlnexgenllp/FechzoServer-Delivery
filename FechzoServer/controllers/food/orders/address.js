@@ -1,7 +1,7 @@
 const User = require('../../../models/User/User');
 const mongoose = require('mongoose');
 
-// Add a new address for a user (for /api/food/order/addresses)
+// Add a new address
 exports.addAddress = async (req, res) => {
   try {
     console.log("Incoming request to add address:", req.body);
@@ -18,8 +18,9 @@ exports.addAddress = async (req, res) => {
       pincode,
       country,
       phone,
-      latitude,
-      longitude,
+      latitude,         // from frontend
+      longitude,        // from frontend
+      coords,           // optional alternative
       deliveryInstructions,
       isDefault,
       isBillingAddress,
@@ -29,14 +30,12 @@ exports.addAddress = async (req, res) => {
 
     // Validate userId
     if (!userId || !mongoose.Types.ObjectId.isValid(userId)) {
-      console.warn("Invalid user ID:", userId);
       return res.status(400).json({ message: 'Invalid user ID' });
     }
 
-    // Find user first
+    // Find user
     const user = await User.findById(userId);
     if (!user) {
-      console.warn("User not found with ID:", userId);
       return res.status(404).json({ message: 'User not found' });
     }
 
@@ -44,12 +43,28 @@ exports.addAddress = async (req, res) => {
     const requiredFields = ['name', 'completeAddress', 'city', 'state', 'pincode', 'country', 'phone'];
     for (const field of requiredFields) {
       if (!req.body[field] || typeof req.body[field] !== 'string' || req.body[field].trim() === '') {
-        console.warn(`Missing or invalid field: ${field}`);
         return res.status(400).json({ message: `Missing or invalid field: ${field}` });
       }
     }
 
-    // Create the address document
+    // Parse coordinates – support both direct lat/lng and coords object
+    let coordinates = [0, 0]; // fallback
+
+    if (coords && typeof coords === 'object') {
+      const lat = Number(coords.lat || coords.latitude);
+      const lng = Number(coords.lng || coords.longitude);
+      if (!isNaN(lat) && !isNaN(lng)) {
+        coordinates = [lng, lat]; // MongoDB: [longitude, latitude]
+      }
+    } else if (latitude && longitude && !isNaN(Number(latitude)) && !isNaN(Number(longitude))) {
+      coordinates = [Number(longitude), Number(latitude)];
+    } else {
+      console.warn("No valid coordinates provided – saving with [0,0]");
+    }
+
+    console.log("Parsed coordinates:", coordinates);
+
+    // Create new address object
     const newAddress = {
       _id: new mongoose.Types.ObjectId(),
       type: type || 'Home',
@@ -60,41 +75,35 @@ exports.addAddress = async (req, res) => {
       city: city.trim(),
       state: state.trim(),
       pincode: pincode.trim(),
-      country: country.trim(),
+      country: country.trim() || 'India',
       phone: phone.trim(),
-      latitude: latitude && !isNaN(latitude) ? Number(latitude) : undefined,
-      longitude: longitude && !isNaN(longitude) ? Number(longitude) : undefined,
       deliveryInstructions: deliveryInstructions?.trim() || '',
       isDefault: Boolean(isDefault),
       isBillingAddress: Boolean(isBillingAddress),
+      location: {
+        type: 'Point',
+        coordinates,          // ← This is the key change!
+      },
       createdAt: new Date(),
       updatedAt: new Date(),
     };
 
-    console.log("Processing coordinates:", {
-      latitude: newAddress.latitude,
-      longitude: newAddress.longitude,
-    });
-
-    // Handle setting default address
+    // Handle default / billing logic
     if (newAddress.isDefault) {
-      console.log("Setting this address as default. Unsetting others...");
       await User.updateOne(
         { _id: userId },
         { $set: { "addresses.$[].isDefault": false } }
       );
     }
 
-    // Handle setting billing address
     if (newAddress.isBillingAddress) {
-      console.log("Setting this address as billing address. Unsetting others...");
       await User.updateOne(
         { _id: userId },
         { $set: { "addresses.$[].isBillingAddress": false } }
       );
     }
 
-    // Add the new address
+    // Push new address
     const result = await User.updateOne(
       { _id: userId },
       {
@@ -104,11 +113,10 @@ exports.addAddress = async (req, res) => {
     );
 
     if (result.modifiedCount === 0) {
-      console.warn("Failed to add address for user:", userId);
       return res.status(400).json({ message: 'Failed to add address' });
     }
 
-    // Fetch the updated user to get the new address
+    // Fetch updated address
     const updatedUser = await User.findById(userId);
     const savedAddress = updatedUser.addresses.id(newAddress._id);
 
@@ -120,13 +128,6 @@ exports.addAddress = async (req, res) => {
     });
   } catch (error) {
     console.error("Error while adding address:", error);
-    if (error.name === 'ValidationError') {
-      const messages = Object.values(error.errors).map((err) => err.message);
-      return res.status(400).json({
-        message: 'Validation failed',
-        errors: messages,
-      });
-    }
     res.status(500).json({
       message: 'Failed to add address',
       error: error.message,
@@ -134,8 +135,122 @@ exports.addAddress = async (req, res) => {
   }
 };
 
+// Update address (similar changes)
+exports.updateAddress = async (req, res) => {
+  try {
+    const { userId, addressId } = req.params;
+    const {
+      type,
+      name,
+      address,
+      completeAddress,
+      landmark,
+      city,
+      state,
+      pincode,
+      country,
+      phone,
+      latitude,
+      longitude,
+      coords,
+      deliveryInstructions,
+      isDefault,
+      isBillingAddress,
+    } = req.body;
 
-// Get all addresses for a user
+    if (!mongoose.Types.ObjectId.isValid(userId) || !mongoose.Types.ObjectId.isValid(addressId)) {
+      return res.status(400).json({ message: 'Invalid userId or addressId' });
+    }
+
+    const user = await User.findById(userId);
+    if (!user) return res.status(404).json({ message: 'User not found' });
+
+    const existingAddress = user.addresses.id(addressId);
+    if (!existingAddress) return res.status(404).json({ message: 'Address not found' });
+
+    // Parse coordinates
+    let coordinates = existingAddress.location?.coordinates || [0, 0];
+
+    if (coords && typeof coords === 'object') {
+      const lat = Number(coords.lat || coords.latitude);
+      const lng = Number(coords.lng || coords.longitude);
+      if (!isNaN(lat) && !isNaN(lng)) {
+        coordinates = [lng, lat];
+      }
+    } else if (latitude && longitude && !isNaN(Number(latitude)) && !isNaN(Number(longitude))) {
+      coordinates = [Number(longitude), Number(latitude)];
+    }
+
+    console.log("Update coordinates:", coordinates);
+
+    const session = await User.startSession();
+    session.startTransaction();
+
+    try {
+      if (isDefault || isBillingAddress) {
+        const unsetFields = {};
+        if (isDefault) unsetFields["addresses.$[].isDefault"] = false;
+        if (isBillingAddress) unsetFields["addresses.$[].isBillingAddress"] = false;
+
+        await User.updateOne(
+          { _id: userId },
+          { $set: unsetFields },
+          { session }
+        );
+      }
+
+      const updateFields = {
+        "addresses.$.type": type?.trim() || existingAddress.type,
+        "addresses.$.name": name?.trim() || existingAddress.name,
+        "addresses.$.address": address?.trim() || existingAddress.address,
+        "addresses.$.completeAddress": completeAddress?.trim() || existingAddress.completeAddress,
+        "addresses.$.landmark": landmark?.trim() || existingAddress.landmark,
+        "addresses.$.city": city?.trim() || existingAddress.city,
+        "addresses.$.state": state?.trim() || existingAddress.state,
+        "addresses.$.pincode": pincode?.trim() || existingAddress.pincode,
+        "addresses.$.country": country?.trim() || existingAddress.country,
+        "addresses.$.phone": phone?.trim() || existingAddress.phone,
+        "addresses.$.deliveryInstructions": deliveryInstructions?.trim() || existingAddress.deliveryInstructions,
+        "addresses.$.isDefault": Boolean(isDefault),
+        "addresses.$.isBillingAddress": Boolean(isBillingAddress),
+        "addresses.$.updatedAt": new Date(),
+        "addresses.$.location": {
+          type: 'Point',
+          coordinates,   // ← Save GeoJSON!
+        },
+      };
+
+      await User.updateOne(
+        { _id: userId, "addresses._id": addressId },
+        { $set: updateFields },
+        { session }
+      );
+
+      await session.commitTransaction();
+
+      const updatedUser = await User.findById(userId);
+      const updatedAddress = updatedUser.addresses.id(addressId);
+
+      return res.status(200).json({
+        message: 'Address updated successfully',
+        address: updatedAddress,
+      });
+    } catch (error) {
+      await session.abortTransaction();
+      throw error;
+    } finally {
+      session.endSession();
+    }
+  } catch (error) {
+    console.error('UpdateAddress: Error', error);
+    return res.status(500).json({
+      message: 'Failed to update address',
+      error: error.message,
+    });
+  }
+};
+
+// Get addresses (already fine, but now will return location.coordinates)
 exports.getUserAddresses = async (req, res) => {
   try {
     const userId = req.params.userId;
@@ -151,6 +266,9 @@ exports.getUserAddresses = async (req, res) => {
 
     const addresses = user.addresses.map((addr) => ({
       ...addr.toObject(),
+      // Optional: add flat lat/lng for frontend convenience
+      latitude: addr.location?.coordinates?.[1],
+      longitude: addr.location?.coordinates?.[0],
     }));
 
     res.status(200).json(addresses);
@@ -158,7 +276,6 @@ exports.getUserAddresses = async (req, res) => {
     res.status(500).json({ message: 'Failed to fetch addresses', error: error.message });
   }
 };
-
 
 exports.updateAddress = async (req, res) => {
   try {

@@ -3,9 +3,18 @@ const router = express.Router();
 const verifyPartner = require("../../middleware/auth/verifyPartner");
 
 const {
-  getNearbyOrders,
-} = require("../../controllers/deliverypartner/order.controller");
+  getAvailableOrders,
+  acceptOrder,
+  updateOrderStatus
+} = require("../../controllers/food/orders/orderController");
 
-router.get("/nearby-orders", verifyPartner, getNearbyOrders);
+// Nearby orders
+router.get("/nearby-orders", verifyPartner, getAvailableOrders);
+
+// Accept an order
+router.post("/:orderId/accept", verifyPartner, acceptOrder);
+
+// Reject an order (or update status)
+router.post("/:orderId/reject", verifyPartner, updateOrderStatus);
 
 module.exports = router;

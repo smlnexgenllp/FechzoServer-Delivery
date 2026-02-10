@@ -17,7 +17,19 @@ const RestaurantSchema = new mongoose.Schema({
     region: { type: String, required: true },
     city: { type: String, required: true },
     address: { type: String, required: true },
-    geo: { type: Object } // Can be further detailed if needed
+    geo: {
+      type: {
+        type: String,
+        enum: ['Point'],
+        required: true,
+        default: 'Point'
+      },
+      coordinates: {
+        type: [Number], // [longitude, latitude]
+        required: true
+      }
+    }
+   // Can be further detailed if needed
   },
   cuisines: [String],
   ratings: { type: Number, default: 0 },
@@ -35,4 +47,5 @@ const RestaurantSchema = new mongoose.Schema({
   status: { type: String, default: "active" },
 }, { timestamps: true });
 
+RestaurantSchema.index({ "locationDetails.geo": "2dsphere" });
 module.exports = mongoose.model("restaurants", RestaurantSchema);

@@ -1,57 +1,42 @@
-const mongoose = require('mongoose');
+const mongoose = require("mongoose");
 
-const deliveryPartnerSchema = new mongoose.Schema({
-  email: {
-    type: String,
-    required: true,
-    unique: true,
-    lowercase: true,
-    trim: true
-  },
-  phone: {
-    type: String,
-    unique: true,
-    sparse: true,
-  },
-  fullName: {
-    type: String,
-    trim: true
-  },
-  profilePhoto: String,
-  vehicleType: {
-    type: String,
-    enum: ['bike', 'scooter', 'cycle', 'car', 'van', 'other']
-  },
-  vehicleNumber: {
-    type: String,
-    uppercase: true,
-    trim: true
-  },
-  drivingLicense: String,
-  aadhaarNumber: String,
-  panNumber: String,
-  bankAccount: {
+const DeliveryPartnerSchema = new mongoose.Schema(
+  {
+    fullName: String,
+    email: { type: String, unique: true },
+    phone: String,
+
+    vehicleType: String,
+    vehicleNumber: String,
+    licenseNumber: String,
+    aadharNumber: String,
+
+    city: String,
+    area: String,
+    latitude: Number,
+    longitude: Number,
+
+    bankName: String,
     accountNumber: String,
-    ifscCode: String,
-    accountHolder: String
+    ifsc: String,
+
+    onboardingCompleted: { type: Boolean, default: false },
+
+    approvalStatus: {
+      type: String,
+      enum: ["PENDING", "APPROVED", "REJECTED"],
+      default: "PENDING",
+    },
+
+    isActive: { type: Boolean, default: false },
+
+    loginOtp: String,
+    otpExpires: Date,
   },
-  isVerified: { type: Boolean, default: false },
-  isActive: { type: Boolean, default: true },
-  documentsSubmitted: { type: Boolean, default: false },
-  currentLocation: {
-    type: { type: String, enum: ['Point'], default: 'Point' },
-    coordinates: { type: [Number], default: [0, 0] }
-  },
-  createdAt: { type: Date, default: Date.now },
-  lastLogin: Date
-});
+  { timestamps: true }
+);
 
-deliveryPartnerSchema.index({ email: 1 });
-deliveryPartnerSchema.index({ phone: 1 });
-
-// Safe model definition
-const DeliveryPartner = mongoose.models.DeliveryPartner
-  ? mongoose.model('DeliveryPartner')
-  : mongoose.model('DeliveryPartner', deliveryPartnerSchema);
-
-module.exports = DeliveryPartner;
+// ⭐ KEY LINE — prevents OverwriteModelError
+module.exports =
+  mongoose.models.DeliveryPartner ||
+  mongoose.model("DeliveryPartner", DeliveryPartnerSchema);

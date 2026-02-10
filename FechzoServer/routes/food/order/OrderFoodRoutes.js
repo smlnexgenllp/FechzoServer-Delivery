@@ -10,7 +10,8 @@ const addressController = require("../../../controllers/food/orders/address");
 const orderController = require("../../../controllers/food/orders/orderController");
 const kitchenController = require("../../../controllers/food/orders/kitchenController");
 router.get("/history", kitchenController.getOrderHistory);
-
+const partnerAuth = require("../../../middleware/auth/partnerAuth");
+ 
 router.post("/cart", addToCart);
 router.post("/updatecart", updateCartItem);
 
@@ -50,5 +51,7 @@ router.get('/admin/refunds', orderController.getAdminRefunds);
 router.get('/admin/refunds/:restaurantId', orderController.getAdminRefunds);
 router.patch('/admin/refunds/:orderId/approve', orderController.approveRefund);
 router.patch('/admin/refunds/:orderId/reject', orderController.rejectRefund);
-
+router.get('/available-orders', partnerAuth, orderController.getAvailableOrders);
+router.put('/accept/:orderId', partnerAuth, orderController.acceptOrder);
+router.put('/update-order-status/:orderId', partnerAuth, orderController.updateOrderStatus);
 module.exports = router;

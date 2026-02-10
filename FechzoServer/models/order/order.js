@@ -69,18 +69,25 @@ const orderSchema = new mongoose.Schema(
       phone: String,
     },
 
-    // 🔴 DELIVERY LOCATION (NEW)
     deliveryLocation: {
-      type: {
-        type: String,
-        enum: ["Point"],
-        default: "Point",
+  type: {
+    type: String,
+    enum: ["Point"],
+    required: true,
+    default: "Point",
+  },
+  coordinates: {
+    type: [Number], // [lng, lat]
+    required: true,
+    validate: {
+      validator: function (val) {
+        return Array.isArray(val) && val.length === 2;
       },
-      coordinates: {
-        type: [Number], // [lng, lat]
-        index: "2dsphere",
-      },
+      message: "Coordinates must be [longitude, latitude]",
     },
+  },
+},
+
 
     orderStatus: {
       type: String,
@@ -130,5 +137,6 @@ const orderSchema = new mongoose.Schema(
   },
   { timestamps: true }
 );
+orderSchema.index({ deliveryLocation: "2dsphere" });
 
 module.exports = mongoose.model('Order', orderSchema);
