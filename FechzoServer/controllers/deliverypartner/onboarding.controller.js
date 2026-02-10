@@ -1,4 +1,4 @@
-const DeliveryPartner = require("../../models/deliveryPartner/DeliveryPartner");
+const DeliveryPartner = require("../../models/deliverypartner/DeliveryPartner");
 const { createNotification } = require("../admin/NotificationController");
 
 const submitOnboarding = async (req, res) => {

@@ -1,4 +1,4 @@
-const DeliveryPartner = require("../../models/deliveryPartner/DeliveryPartner");
+const DeliveryPartner = require("../../models/deliverypartner/DeliveryPartner");
 
 // Existing function (DON'T CHANGE)
 const checkDeliveryPartner = async (req, res) => {
