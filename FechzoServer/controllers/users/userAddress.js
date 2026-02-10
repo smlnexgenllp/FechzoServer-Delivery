@@ -3,12 +3,14 @@ const User = require('../../models/User/User'); // Adjust path if needed
 const updateAddress = async (req, res) => {
     try {
         console.log("Received Data:", req.body); // Debugging
-        const { userId, doorNo, street, city, state, landmark, pincode } = req.body;
+        const { userId, doorNo, street, city, state, landmark, pincode ,latitude,longitude} = req.body;
 
         if (!userId || !doorNo || !street || !city || !state || !pincode) {
             return res.status(400).json({ error: "All fields are required" });
         }
-
+        if (!latitude || !longitude) {
+  return res.status(400).json({ error: "Latitude & Longitude required" });
+}
         const user = await User.findById(userId);
         if (!user) return res.status(404).json({ error: "User not found" });
 
@@ -16,7 +18,8 @@ const updateAddress = async (req, res) => {
             user.addresses = []; // Ensure addresses array exists
         }
 
-        user.addresses.push({ doorNo, street, city, state, landmark, pincode });
+        user.addresses.push({ doorNo, street, city, state, landmark, pincode, latitude: Number(latitude),
+  longitude: Number(longitude) });
         await user.save();
 
         res.status(200).json({ message: "Address added successfully", addresses: user.addresses });
@@ -30,12 +33,15 @@ const updateAddress = async (req, res) => {
 const editAddress = async (req, res) => {
     try {
         const { userId, addressId } = req.params;
-        const { doorNo, street, landmark, city, state, pincode } = req.body;
+        const { doorNo, street, landmark, city, state, pincode, latitude, longitude } = req.body;
 
         if (!userId || !addressId) return res.status(400).json({ error: "User ID and Address ID are required" });
         if (!doorNo || !street || !city || !state || !pincode) {
             return res.status(400).json({ error: "All address fields are required" });
         }
+        if (!latitude || !longitude) {
+  return res.status(400).json({ error: "Latitude & Longitude required" });
+}
 
         const user = await User.findById(userId);
         if (!user) return res.status(404).json({ error: "User not found" });
@@ -43,7 +49,7 @@ const editAddress = async (req, res) => {
         const addressIndex = user.addresses.findIndex(addr => addr._id.toString() === addressId);
         if (addressIndex === -1) return res.status(404).json({ error: "Address not found" });
 
-        user.addresses[addressIndex] = { _id: addressId, doorNo, street, landmark, city, state, pincode };
+        user.addresses[addressIndex] = { _id: addressId, doorNo, street, landmark, city, state, pincode, latitude: Number(latitude), longitude: Number(longitude) };
         await user.save();
 
         return res.status(200).json({ message: "Address updated successfully", addresses: user.addresses });

@@ -152,6 +152,30 @@ io.on('connection', (socket) => {
 // Make io accessible globally or pass it to routes if needed
 app.set('io', io);
 
+io.on("connection", (socket) => {
+  console.log("Socket connected:", socket.id);
+
+  // Partner joins their room
+  socket.on("joinPartner", ({ partnerId }) => {
+    if (!partnerId) return;
+    socket.join(`partner_${partnerId}`);
+    console.log(`Partner ${partnerId} joined room partner_${partnerId}`);
+  });
+
+  // Restaurant joins their room
+  socket.on("joinRestaurant", ({ restaurantId }) => {
+    if (!restaurantId) return;
+    socket.join(`restaurant_${restaurantId}`);
+    console.log(`Restaurant ${restaurantId} joined room restaurant_${restaurantId}`);
+  });
+
+  socket.on("disconnect", () => {
+    console.log("Socket disconnected:", socket.id);
+  });
+});
+
+
+
 // Import routes
 const userRoutes = require('./routes/users/userRoutes');
 const restaurantRoutes = require('./routes/restaurants/restaurantRoutes');

@@ -77,167 +77,100 @@ exports.createOrder = async (req, res) => {
     cgst,
     sgst,
     appliedPromoCode,
-    selectedOffer,
-    offerBenefits,
+    selectedOffer
   } = req.body;
 
   try {
-    console.log("Starting order creation with body:", req.body);
+    // ----------------- INPUT VALIDATION -----------------
+    if (!amount || amount <= 0) return res.status(400).json({ error: "Invalid amount" });
+    if (!["cash","cards","upi","wallets"].includes(paymentMethod)) return res.status(400).json({ error: "Invalid payment method" });
+    if (!userId) return res.status(400).json({ error: "User ID is required" });
+    if (!cartItems?.length) return res.status(400).json({ error: "Cart items are required" });
+    if (!selectedAddress?.address || !selectedAddress?.phone) return res.status(400).json({ error: "Valid address is required" });
+    if (paymentMethod === "upi" && !upiId?.match(/^[\w.-]+@[\w.-]+$/)) return res.status(400).json({ error: "Valid UPI ID is required for UPI payments" });
 
-    // Input validation
-    console.log("Validating inputs");
-    if (!amount || amount <= 0) {
-      console.log("Invalid amount:", amount);
-      return res.status(400).json({ error: "Invalid amount" });
-    }
-    if (
-      !paymentMethod ||
-      !["cash", "cards", "upi", "wallets"].includes(paymentMethod)
-    ) {
-      console.log("Invalid payment method:", paymentMethod);
-      return res.status(400).json({ error: "Invalid payment method" });
-    }
-    if (!userId) {
-      console.log("User ID missing");
-      return res.status(400).json({ error: "User ID is required" });
-    }
-    if (!cartItems || !Array.isArray(cartItems) || cartItems.length === 0) {
-      console.log("Invalid cart items:", cartItems);
-      return res.status(400).json({ error: "Cart items are required" });
-    }
-    if (
-      !selectedAddress ||
-      !selectedAddress.address ||
-      !selectedAddress.phone
-    ) {
-      console.log("Invalid address:", selectedAddress);
-      return res.status(400).json({ error: "Valid address is required" });
-    }
-    if (
-      paymentMethod === "upi" &&
-      (!upiId || !upiId.match(/^[\w.-]+@[\w.-]+$/))
-    ) {
-      console.log("Invalid UPI ID:", upiId);
-      return res
-        .status(400)
-        .json({ error: "Valid UPI ID is required for UPI payments" });
-    }
-    if (!itemsTotal || isNaN(parseFloat(itemsTotal))) {
-      console.log("Invalid items total:", itemsTotal);
-      return res.status(400).json({ error: "Valid items total is required" });
-    }
-    if (!deliveryCharge || isNaN(parseFloat(deliveryCharge))) {
-      console.log("Invalid delivery charge:", deliveryCharge);
-      return res
-        .status(400)
-        .json({ error: "Valid delivery charge is required" });
-    }
-    if (!packingCharge || isNaN(parseFloat(packingCharge))) {
-      console.log("Invalid packing charge:", packingCharge);
-      return res
-        .status(400)
-        .json({ error: "Valid packing charge is required" });
-    }
-    if (!platformFee || isNaN(parseFloat(platformFee))) {
-      console.log("Invalid platform fee:", platformFee);
-      return res.status(400).json({ error: "Valid platform fee is required" });
-    }
-    if (!cgst || isNaN(parseFloat(cgst))) {
-      console.log("Invalid CGST:", cgst);
-      return res.status(400).json({ error: "Valid CGST is required" });
-    }
-    if (!sgst || isNaN(parseFloat(sgst))) {
-      console.log("Invalid SGST:", sgst);
-      return res.status(400).json({ error: "Valid SGST is required" });
-    }
-    if (discount && isNaN(parseFloat(discount))) {
-      console.log("Invalid discount:", discount);
-      return res.status(400).json({ error: "Valid discount is required" });
-    }
-    if (paymentMethod === "cash" && amount < 100) {
-      console.log("Cash on delivery not available for amount:", amount);
-      return res.status(400).json({
-        error: "Cash on delivery not available for orders below ₹100",
-      });
+    // Validate numeric fields
+    const numericFields = { itemsTotal, deliveryCharge, packingCharge, platformFee, cgst, sgst, discount: discount || 0 };
+    for (const [key, value] of Object.entries(numericFields)) {
+      if (isNaN(parseFloat(value))) return res.status(400).json({ error: `Invalid ${key}` });
     }
 
-    // Calculate grand total
-    console.log("Calculating grand total");
+    if (paymentMethod === "cash" && amount < 100)
+      return res.status(400).json({ error: "Cash on delivery not available for orders below ₹100" });
+
+    // ----------------- CALCULATE GRAND TOTAL -----------------
     const calculatedGrandTotal = (
-      parseFloat(itemsTotal) -
-      parseFloat(discount || "0.00") +
-      parseFloat(deliveryCharge) +
-      parseFloat(packingCharge) +
-      parseFloat(platformFee) +
-      parseFloat(cgst) +
-      parseFloat(sgst)
+      parseFloat(itemsTotal) - parseFloat(discount || 0) +
+      parseFloat(deliveryCharge) + parseFloat(packingCharge) +
+      parseFloat(platformFee) + parseFloat(cgst) + parseFloat(sgst)
     ).toFixed(2);
-    console.log("Calculated grand total:", calculatedGrandTotal);
 
-    // Validate amount matches grand total
     if (parseFloat(amount).toFixed(2) !== calculatedGrandTotal) {
-      console.log(
-        "Amount mismatch. Expected:",
-        calculatedGrandTotal,
-        "Received:",
-        amount
-      );
       return res.status(400).json({
         error: "Provided amount does not match calculated grand total",
-        details: `Expected: ${calculatedGrandTotal}, Received: ${amount}`,
+        details: `Expected: ${calculatedGrandTotal}, Received: ${amount}`
       });
     }
 
-    // Fetch the user's cart to get restaurant info
-    console.log("Fetching cart for user:", userId);
-    const cart = await Cart.findOne({ userId });
-    if (!cart) {
-      console.log("Cart not found for user:", userId);
-      return res.status(404).json({ error: "Cart not found" });
+    // ----------------- GET RESTAURANT FROM CART ITEMS -----------------
+    const restaurantId = cartItems[0]?.restaurantId || cartItems[0]?.restaurant_id;
+    if (!restaurantId) {
+      return res.status(400).json({ error: "Restaurant ID missing from cart items" });
     }
-    console.log("Cart fetched:", cart);
 
-    // Get restaurant details
-    console.log("Fetching restaurant:", cart.restaurant_id);
-    const restaurant = await mongoose
-      .model("Restaurant")
-      .findById(cart.restaurant_id);
+    const restaurant = await mongoose.model("Restaurant").findById(restaurantId);
     if (!restaurant) {
-      console.log("Restaurant not found:", cart.restaurant_id);
       return res.status(404).json({ error: "Restaurant not found" });
     }
-    console.log("Restaurant fetched:", restaurant.restaurantName);
 
-    // Construct orderSummary array
-    console.log("Constructing order summary");
-    const orderSummary = [];
-    cartItems.forEach((item) => {
-      const itemTotal = item.price * item.quantity;
-      const addonTotal = item.addons
-        ? item.addons.reduce(
-            (sum, addon) => sum + (addon.price || 0) * (addon.quantity || 0),
-            0
-          )
-        : 0;
-      orderSummary.push({
-        type: "item",
-        id: item.id,
-        totalCost: (itemTotal + addonTotal).toFixed(2),
+    // ----------------- VALIDATE DELIVERY LOCATION -----------------
+    let lat, lng;
+
+    if (selectedAddress.coords) {
+      lat = Number(selectedAddress.coords?.lat);
+      lng = Number(selectedAddress.coords?.lng);
+    } else if (selectedAddress.latitude && selectedAddress.longitude) {
+      lat = Number(selectedAddress.latitude);
+      lng = Number(selectedAddress.longitude);
+    } else {
+      return res.status(400).json({
+        error: "Delivery coordinates are missing",
+        details: "Expected coords.lat/lng or latitude/longitude in selectedAddress"
       });
+    }
+
+    if (
+      isNaN(lat) ||
+      isNaN(lng) ||
+      lat < -90 ||
+      lat > 90 ||
+      lng < -180 ||
+      lng > 180
+    ) {
+      return res.status(400).json({
+        error: "Invalid delivery location coordinates",
+        received: { lat, lng }
+      });
+    }
+
+    const deliveryLocation = {
+      type: "Point",
+      coordinates: [lng, lat]  // longitude first!
+    };
+
+    console.log("Selected Address received:", selectedAddress);
+    console.log("Parsed coordinates:", { lat, lng });
+
+    // ----------------- CONSTRUCT ORDER SUMMARY -----------------
+    const orderSummary = cartItems.map(item => {
+      const itemTotal = item.price * item.quantity;
+      const addonTotal = item.addons?.reduce((sum, a) => sum + (a.price || 0) * (a.quantity || 0), 0) || 0;
+      return { type: "item", id: item.id, totalCost: (itemTotal + addonTotal).toFixed(2) };
     });
     orderSummary.push({ type: "itemsTotal", value: itemsTotal });
-    // Only add discount entry if there's actually a discount and promo code
     if (discount && parseFloat(discount) > 0) {
-      const discountEntry = {
-        type: "discount",
-        value: discount,
-      };
-
-      // Only add promoCode if it's not empty
-      if (appliedPromoCode && appliedPromoCode.trim() !== "") {
-        discountEntry.promoCode = appliedPromoCode;
-      }
-
+      const discountEntry = { type: "discount", value: discount };
+      if (appliedPromoCode?.trim()) discountEntry.promoCode = appliedPromoCode;
       orderSummary.push(discountEntry);
     }
     orderSummary.push({ type: "deliveryCharge", value: deliveryCharge });
@@ -246,42 +179,33 @@ exports.createOrder = async (req, res) => {
     orderSummary.push({ type: "cgst", value: cgst });
     orderSummary.push({ type: "sgst", value: sgst });
     orderSummary.push({ type: "grandTotal", value: calculatedGrandTotal });
-    console.log("Order summary constructed:", orderSummary);
 
-    // Generate orderId and paymentId
+    // ----------------- GENERATE ORDER & PAYMENT IDS -----------------
     const orderId = await generateOrderId();
     const paymentId = await generatePaymentId();
 
-    // ADD THIS ENTIRE SECTION - NEW: Track applied offers
-    console.log("Processing applied offers");
+    // ----------------- PROCESS APPLIED OFFERS -----------------
     const appliedOffers = [];
 
-    // Handle promo code offers
+    // Promo Code
     if (appliedPromoCode) {
-      // Find the promo offer
-      let promoOffer = null;
-
-      // Check restaurant-specific offers first
-      promoOffer = await Offer.findOne({
-        restaurantId: cart.restaurant_id,
-        offerType: 'promo',
-        promoCode: appliedPromoCode,
-        status: 'Active',
-        validFrom: { $lte: new Date() },
-        validTo: { $gte: new Date() }
+      let promoOffer = await Offer.findOne({ 
+        restaurantId: restaurant._id, 
+        offerType: 'promo', 
+        promoCode: appliedPromoCode, 
+        status: 'Active', 
+        validFrom: { $lte: new Date() }, 
+        validTo: { $gte: new Date() } 
       });
-
-      // If not found, check admin offers
       if (!promoOffer) {
-        promoOffer = await AdminOffer.findOne({
-          offerType: 'promo',
-          promoCode: appliedPromoCode,
-          status: 'Active',
-          validFrom: { $lte: new Date() },
-          validTo: { $gte: new Date() }
+        promoOffer = await AdminOffer.findOne({ 
+          offerType: 'promo', 
+          promoCode: appliedPromoCode, 
+          status: 'Active', 
+          validFrom: { $lte: new Date() }, 
+          validTo: { $gte: new Date() } 
         });
       }
-
       if (promoOffer) {
         appliedOffers.push({
           offerId: promoOffer._id,
@@ -294,73 +218,55 @@ exports.createOrder = async (req, res) => {
       }
     }
 
-    // Handle selected offer (freebie, bogo, combo)
+    // Selected Offer (freebie, bogo, combo)
     if (selectedOffer && selectedOffer.type !== 'promo') {
-      // Extract the actual ObjectId from the prefixed string
-      let actualOfferId = selectedOffer.id;
-      if (typeof actualOfferId === 'string' && actualOfferId.includes('-')) {
-        // Remove prefix like "freebie-", "bogo-", "combo-"
-        actualOfferId = actualOfferId.split('-')[1];
-      }
-
-      console.log('Processing selected offer:', selectedOffer.type, 'with ID:', actualOfferId);
-
+      let actualOfferId = selectedOffer.id?.includes('-') ? selectedOffer.id.split('-')[1] : selectedOffer.id;
       const offer = await Offer.findById(actualOfferId);
       if (offer) {
-        const appliedOffer = {
-          offerId: offer._id,
-          offerType: selectedOffer.type,
-          discountAmount: 0,
-          appliedAt: new Date()
+        const appliedOffer = { 
+          offerId: offer._id, 
+          offerType: selectedOffer.type, 
+          discountAmount: 0, 
+          appliedAt: new Date() 
         };
-
         if (selectedOffer.type === 'freebie') {
           appliedOffer.freeItems = [selectedOffer.item?.name || 'Free Item'];
-          // Set the discount amount to the item's value for display purposes
           appliedOffer.discountAmount = parseFloat(selectedOffer.value || selectedOffer.item?.price || 0);
         } else if (selectedOffer.type === 'bogo') {
           appliedOffer.freeItems = [selectedOffer.getFreeItem || 'Free Item'];
-          // Add discount amount calculation for BOGO
           appliedOffer.discountAmount = parseFloat(selectedOffer.value || selectedOffer.discountValue || 0);
         } else if (selectedOffer.type === 'combo') {
           appliedOffer.discountAmount = parseFloat(discount || 0);
         }
-
         appliedOffers.push(appliedOffer);
-        console.log('Applied offer added:', appliedOffer);
-      } else {
-        console.log('Offer not found with ID:', actualOfferId);
       }
     }
 
-    // Create Order document
-    console.log("Creating order document");
+    // ----------------- CREATE ORDER DOCUMENT -----------------
     const orderData = {
       orderId,
       userId,
       cartItems,
       total: amount,
       selectedAddress,
-      restaurantId: cart.restaurant_id,
-      restaurantName: restaurant.restaurantName || 'Restaurant',
-      restaurantImage: restaurant.images?.profile || '',
+      restaurantId: restaurant._id,
+      restaurantName: restaurant.restaurantName || "Restaurant",
+      restaurantImage: restaurant.images?.profile || "",
+      deliveryLocation,
     };
-    console.log("Order data:", orderData);
 
     const session = await mongoose.startSession();
-    console.log("Mongoose session started");
     session.startTransaction();
     try {
       const order = new Order(orderData);
-      console.log("Saving order:", orderId);
       await order.save({ session });
-      console.log("Order saved:", orderId);
 
+      // Use restaurant._id instead of cart.restaurant_id
       if (appliedOffers.length > 0) {
-        await updateOfferAnalytics(appliedOffers, cart.restaurant_id, req);
+        await updateOfferAnalytics(appliedOffers, restaurant._id, req);
       }
 
-      // Create Payment document with orderSummary
+      // ----------------- CREATE PAYMENT DOCUMENT -----------------
       const paymentData = {
         paymentId,
         orderId,
@@ -368,155 +274,49 @@ exports.createOrder = async (req, res) => {
         paymentStatus: "pending",
         upiId: paymentMethod === "upi" ? upiId : undefined,
         orderSummary,
-        appliedOffers: appliedOffers,
+        appliedOffers
       };
-      console.log("Payment data:", paymentData);
 
-      let razorpayOrder = null;
+      // Razorpay order for non-cash
       if (paymentMethod !== "cash") {
-        const options = {
-          amount: Math.round(parseFloat(amount) * 100), // Convert to paise and ensure integer
-          currency: "INR",
-          receipt: `receipt_order_${Date.now()}`,
+        const options = { 
+          amount: Math.round(parseFloat(amount) * 100), 
+          currency: "INR", 
+          receipt: `receipt_order_${Date.now()}` 
         };
-        console.log("Creating Razorpay order with options:", options);
-        try {
-          razorpayOrder = await razorpayInstance.orders.create(options);
-          console.log("Razorpay order created:", razorpayOrder);
-          paymentData.razorpayOrderId = razorpayOrder.id;
-        } catch (razorpayErr) {
-          console.error("Razorpay order creation failed:", razorpayErr);
-          throw new Error(
-            `Razorpay order creation failed: ${
-              razorpayErr.message || "Unknown error"
-            }`
-          );
-        }
+        const razorpayOrder = await razorpayInstance.orders.create(options);
+        paymentData.razorpayOrderId = razorpayOrder.id;
       }
 
       const payment = new Payment(paymentData);
-      console.log("Saving payment:", paymentId);
       await payment.save({ session });
-      console.log("Payment saved:", paymentId);
 
-      console.log("Committing transaction");
-      await session.commitTransaction();
-      console.log("Transaction committed");
-
+      // Clear cart if cash (safe even if no cart)
       if (paymentMethod === "cash") {
-        console.log("Deleting cart for user:", userId);
         await Cart.deleteOne({ userId });
-        console.log("Cart deleted");
-
-        // Create and send notification
-        if (req.app.get("io")) {
-          console.log(
-            "Creating notification for restaurant:",
-            order.restaurantId
-          );
-          const notificationData = {
-            restaurantId: order.restaurantId,
-            type: "order_placed",
-            title: "New Order Placed",
-            message: `Order #${order.orderId} placed worth ₹${order.total}`,
-            details: {
-              orderId: order.orderId,
-              customer: {
-                name: order.selectedAddress?.name || "Customer",
-                phone: order.selectedAddress?.phone || "N/A",
-              },
-              items: order.cartItems,
-              total: order.total,
-              paymentMethod: paymentMethod,
-            },
-            priority: "high", // Ensure this is set to high
-            icon: "FaShoppingBag",
-            sound: true // Add this flag
-          };
-          console.log("Notification data:", notificationData);
-
-          const notification = await notificationController.createNotification(
-            notificationData
-          );
-          console.log("Notification created:", notification);
-          const io = req.app.get("io");
-          io.to(order.restaurantId.toString()).emit("newOrder", {
-            ...order.toObject(),
-            notification,
-            priority: "high", // Add priority here too
-            sound: true
-          });
-          console.log(
-            "Notification emitted to restaurant:",
-            order.restaurantId
-          );
-        }
-
-        // Emit new order event
-        if (req.app.get("io")) {
-          const io = req.app.get("io");
-          io.to(order.restaurantId.toString()).emit("kitchen_new_order", {
-            id: order._id,
-            orderNumber: order.orderId,
-            createdAt: order.createdAt,
-            total: order.total,
-            selectedAddress: {
-              name: order.selectedAddress?.name || "N/A",
-              fullAddress: order.selectedAddress?.address || "N/A",
-              phone: order.selectedAddress?.phone || "N/A",
-              city: order.selectedAddress?.city || "N/A",
-              pincode: order.selectedAddress?.pincode || "N/A",
-            },
-            items: order.cartItems.map((item) => ({
-              quantity: item.quantity,
-              name: item.name,
-              price: item.price,
-              addons: item.addons || [],
-              specialInstructions: item.specialInstructions,
-            })),
-            paymentMethod: payment.paymentMethod,
-            paymentStatus: payment.paymentStatus,
-            orderSummary: payment.orderSummary,
-            appliedOffers: payment.appliedOffers.map(offer => ({
-              offerId: offer.offerId,
-              offerType: offer.offerType,
-              promoCode: offer.promoCode,
-              discountAmount: offer.discountAmount,
-              freeItems: offer.freeItems || [],
-              appliedAt: offer.appliedAt
-            })),
-            status: order.orderStatus,
-          });
-        }
-
-        console.log("Order placed successfully for order:", orderId);
-        return res.json({
-          success: true,
-          orderId,
-          paymentId,
-          message: "Order placed successfully",
-        });
       }
 
-      console.log("Returning Razorpay order response:", razorpayOrder);
-      res.json({ ...razorpayOrder, orderId, paymentId });
-    } catch (err) {
-      console.error("Transaction error:", err);
-      await session.abortTransaction();
-      console.log("Transaction aborted");
-      throw err;
-    } finally {
-      console.log("Ending Mongoose session");
+      await session.commitTransaction();
       session.endSession();
-    }
-  } catch (err) {
-    console.error("Error creating order:", err.stack);
-    res
-      .status(500)
-      .json({
-        error: "Failed to create order",
-        details: err.message || "Unknown error",
+
+      res.json({ 
+        success: true, 
+        orderId, 
+        paymentId, 
+        message: "Order placed successfully" 
       });
+    } catch (err) {
+      await session.abortTransaction();
+      session.endSession();
+      throw err;
+    }
+
+  } catch (err) {
+    console.error("Order creation failed:", err);
+    res.status(500).json({ 
+      error: "Failed to create order", 
+      details: err.message || "Unknown error" 
+    });
   }
 };
 
