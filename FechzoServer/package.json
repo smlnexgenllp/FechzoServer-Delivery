@@ -41,5 +41,8 @@
     "razorpay": "^2.9.6",
     "react-onesignal": "^3.2.2",
     "socket.io": "^4.8.1"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.11"
   }
 }
