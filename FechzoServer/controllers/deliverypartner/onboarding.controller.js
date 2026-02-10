@@ -1,16 +1,16 @@
 const DeliveryPartner = require("../../models/deliveryPartner/DeliveryPartner");
+const { createNotification } = require("../admin/NotificationController");
 
 const submitOnboarding = async (req, res) => {
   try {
     const partnerId = req.partner?.id;
-
     if (!partnerId) {
       return res.status(401).json({ message: "Unauthorized" });
     }
 
     const {
       fullName,
-      mobile,
+      phone,
       vehicleType,
       vehicleNumber,
       licenseNumber,
@@ -24,7 +24,7 @@ const submitOnboarding = async (req, res) => {
       ifsc,
     } = req.body;
 
-    if (!fullName || !mobile || !vehicleType || !vehicleNumber || !city) {
+    if (!fullName || !phone || !vehicleType || !vehicleNumber || !city) {
       return res.status(400).json({ message: "Missing required fields" });
     }
 
@@ -32,7 +32,7 @@ const submitOnboarding = async (req, res) => {
       partnerId,
       {
         fullName,
-        mobile,
+        phone,
         vehicleType,
         vehicleNumber,
         licenseNumber,
@@ -45,17 +45,39 @@ const submitOnboarding = async (req, res) => {
         accountNumber,
         ifsc,
         onboardingCompleted: true,
+        approvalStatus: "PENDING",
+        isActive: false,
       },
       { new: true }
     );
 
+    // ✅ ADMIN NOTIFICATION (SCHEMA-SAFE)
+    await createNotification({
+      restaurantId: "SYSTEM", // required string
+      restaurantName: "Delivery Partner Module",
+
+      category: "Registration", // ✅ VALID ENUM
+
+      action: "DELIVERY_PARTNER_ONBOARDING",
+
+      message: `New delivery partner onboarding request from ${partner.fullName}`,
+
+      details: JSON.stringify({
+        partnerId: partner._id,
+        name: partner.fullName,
+        phone: partner.phone,
+        city: partner.city,
+        vehicleType: partner.vehicleType,
+      }),
+    });
+
     res.status(200).json({
       success: true,
-      message: "Onboarding completed",
-      partner,
+      message: "Onboarding submitted. Waiting for admin approval.",
     });
-  } catch (err) {
-    console.error(err);
+
+  } catch (error) {
+    console.error("Onboarding error:", error);
     res.status(500).json({ message: "Server error" });
   }
 };

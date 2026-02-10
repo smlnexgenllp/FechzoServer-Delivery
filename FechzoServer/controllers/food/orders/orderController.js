@@ -2,7 +2,7 @@ const Order = require('../../../models/order/order');
 const mongoose = require('mongoose');
 const Payment = require('../../../models/order/payment');
 const notificationController = require('../../restaurants/notificationController');
-
+const Restaurant = require('../../../models/restaurants/Restaurants');
 // Get all orders for a specific user
 exports.getUserOrders = async (req, res) => {
     try {
@@ -120,7 +120,7 @@ exports.updateOrderStatus = async (req, res) => {
 
                 const refundAmount = (order.total * refundPercentage / 100).toFixed(2);
 
-                // Record the refund in the order
+                  // Record the refund in the order
                 order.refundAmount = refundAmount;
                 order.refundPercentage = refundPercentage;
                 order.refundStatus = 'pending';
@@ -635,3 +635,83 @@ exports.rejectRefund = async (req, res) => {
   }
 };
 
+
+// Get nearby available orders (Zomato style)
+exports.getAvailableOrders = async (req, res) => {
+  try {
+    const { lat, lng } = req.query;
+    if (!lat || !lng) {
+      return res.status(400).json({ error: "Partner location required" });
+    }
+
+    const nearbyRestaurants = await Restaurant.find({
+      "locationDetails.geo": {
+        $near: {
+          $geometry: {
+            type: "Point",
+            coordinates: [Number(lng), Number(lat)]
+          },
+          $maxDistance: 5000
+        }
+      },
+      is_open: true,
+      status: "active"
+    }).select("_id");
+
+    console.log("Nearby restaurants:", nearbyRestaurants.length);
+
+    if (!nearbyRestaurants.length) {
+      return res.json([]);
+    }
+
+    const restaurantIds = nearbyRestaurants.map(r => r._id);
+
+    const orders = await Order.find({
+      restaurantId: { $in: restaurantIds },
+      orderStatus: "ready",
+      deliveryPartnerId: { $in: [null, undefined] }
+    })
+      .populate("restaurantId", "restaurantDetails.name locationDetails.address")
+      .lean();
+
+    res.json(orders);
+
+  } catch (err) {
+    console.error("Error fetching available orders:", err);
+    res.status(500).json({ error: err.message });
+  }
+};
+
+exports.acceptOrder = async (req, res) => {
+  try {
+    const { orderId } = req.params;
+    const deliveryPartnerId = req.partner.id;
+
+    const order = await Order.findOne({
+      orderId,
+      orderStatus: "ready",
+      deliveryPartnerId: { $in: [null, undefined] }
+
+    });
+
+    if (!order) {
+      return res.status(400).json({ error: "Order unavailable" });
+    }
+
+    order.deliveryPartnerId = deliveryPartnerId;
+    order.orderStatus = "pickedUp";
+    await order.save();
+
+    const io = req.app.get("io");
+    if (io) {
+      io.to(`partner_${deliveryPartnerId}`).emit("orderAssigned", order);
+      io.to(`restaurant_${order.restaurantId}`).emit("orderStatusUpdated", order);
+    }
+
+    res.json({ success: true, message: "Order accepted", order });
+    
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message });
+  }
+};

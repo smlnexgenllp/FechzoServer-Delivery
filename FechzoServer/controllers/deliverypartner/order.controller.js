@@ -1,30 +1,43 @@
 const Order = require("../../models/order/order");
 
-exports.getNearbyOrders = async (req, res) => {
-  try {
-    const partner = req.partner; // from auth middleware
 
-    if (!partner.latitude || !partner.longitude) {
-      return res.status(400).json({ message: "Partner location missing" });
+exports.getNearbyRestaurants = async (req, res) => {
+  try {
+    const { latitude, longitude } = req.query;
+
+    if (!latitude || !longitude) {
+      return res.status(400).json({ success: false, message: "Location required" });
     }
 
-    const orders = await Order.find({
-      orderStatus: "ready_for_pickup",
-      "delivery.partnerId": null,
-      deliveryLocation: {
+    const userLat = Number(latitude);
+    const userLng = Number(longitude);
+
+    console.log(`Searching restaurants near [${userLng}, ${userLat}]`);
+
+    const restaurants = await Restaurant.find({
+      globalStatus: "active",
+      location: {
         $near: {
           $geometry: {
             type: "Point",
-            coordinates: [partner.longitude, partner.latitude],
+            coordinates: [userLng, userLat]  // [longitude, latitude]
           },
-          $maxDistance: 10000, // 10 km
-        },
-      },
-    }).populate("restaurantId", "name address");
+          $maxDistance: 10000 // 10 km
+        }
+      }
+    })
+      .select("restaurantName restaurantAddress images location")
+      .limit(20);
 
-    res.json({ success: true, orders });
+    console.log(`Found ${restaurants.length} nearby restaurants`);
+
+    res.json({
+      success: true,
+      count: restaurants.length,
+      restaurants
+    });
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ message: "Failed to fetch orders" });
+    console.error("Nearby restaurants error:", err);
+    res.status(500).json({ success: false, message: "Failed to fetch" });
   }
 };
