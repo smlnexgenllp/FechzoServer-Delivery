@@ -637,81 +637,126 @@ exports.rejectRefund = async (req, res) => {
 
 
 // Get nearby available orders (Zomato style)
+// Get nearby available orders (directly using deliveryLocation)
 exports.getAvailableOrders = async (req, res) => {
   try {
     const { lat, lng } = req.query;
+
     if (!lat || !lng) {
       return res.status(400).json({ error: "Partner location required" });
     }
 
-    const nearbyRestaurants = await Restaurant.find({
-      "locationDetails.geo": {
-        $near: {
-          $geometry: {
-            type: "Point",
-            coordinates: [Number(lng), Number(lat)]
-          },
-          $maxDistance: 5000
-        }
-      },
-      is_open: true,
-      status: "active"
-    }).select("_id");
+    // Ensure lat/lng are numbers
+    const partnerLat = Number(lat);
+    const partnerLng = Number(lng);
 
-    console.log("Nearby restaurants:", nearbyRestaurants.length);
-
-    if (!nearbyRestaurants.length) {
-      return res.json([]);
+    if (isNaN(partnerLat) || isNaN(partnerLng)) {
+      return res.status(400).json({ error: "Invalid coordinates" });
     }
 
-    const restaurantIds = nearbyRestaurants.map(r => r._id);
-
+    // Find orders within 5 km
     const orders = await Order.find({
-      restaurantId: { $in: restaurantIds },
       orderStatus: "ready",
-      deliveryPartnerId: { $in: [null, undefined] }
+      "delivery.partnerId": null,
+      deliveryLocation: {
+        $near: {
+          $geometry: { type: "Point", coordinates: [partnerLng, partnerLat] },
+          $maxDistance: 5000, // 5 km
+        },
+      },
     })
-      .populate("restaurantId", "restaurantDetails.name locationDetails.address")
+      .populate("restaurantId", "restaurantName restaurantImage") // fetch restaurant info
       .lean();
 
-    res.json(orders);
+    // Optionally calculate distance (in km) for frontend
+    const ordersWithDistance = orders.map((order) => {
+      const [lng, lat] = order.deliveryLocation.coordinates;
+      const distanceKm =
+        getDistanceFromLatLonInKm(partnerLat, partnerLng, lat, lng);
+      return { ...order, distanceKm };
+    });
 
+    res.json(ordersWithDistance);
   } catch (err) {
-    console.error("Error fetching available orders:", err);
+    console.error("Error fetching nearby orders:", err);
     res.status(500).json({ error: err.message });
   }
 };
 
+// Helper function to calculate distance between two coordinates
+function getDistanceFromLatLonInKm(lat1, lon1, lat2, lon2) {
+  const R = 6371; // Radius of the Earth in km
+  const dLat = deg2rad(lat2 - lat1);
+  const dLon = deg2rad(lon2 - lon1);
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(deg2rad(lat1)) *
+      Math.cos(deg2rad(lat2)) *
+      Math.sin(dLon / 2) *
+      Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
+}
+
+function deg2rad(deg) {
+  return deg * (Math.PI / 180);
+}
+
+
 exports.acceptOrder = async (req, res) => {
   try {
-    const { orderId } = req.params;
+    const orderId = req.params.orderId;  // this is the string from URL (should be _id)
     const deliveryPartnerId = req.partner.id;
 
+    // IMPORTANT: Use _id instead of orderId unless you have a custom indexed orderId field
     const order = await Order.findOne({
-      orderId,
+      _id: orderId,                           // ← change here
       orderStatus: "ready",
-      deliveryPartnerId: { $in: [null, undefined] }
-
+      "delivery.partnerId": null              // ← keep if nested, or change to deliveryPartnerId: null
     });
 
     if (!order) {
-      return res.status(400).json({ error: "Order unavailable" });
+      return res.status(400).json({ 
+        error: "Order not found, already assigned, or not in 'ready' status" 
+      });
     }
 
-    order.deliveryPartnerId = deliveryPartnerId;
-    order.orderStatus = "pickedUp";
-    await order.save();
+    // Assign partner - use the SAME field name as in your schema!
+    // Option A - nested
+    order.delivery = order.delivery || {};
+    order.delivery.partnerId = deliveryPartnerId;
 
+    // Option B - flat field (if that's what your schema has)
+    // order.deliveryPartnerId = deliveryPartnerId;
+
+    // Better status (don't jump to pickedUp)
+    order.orderStatus = "accepted";
+
+    // Optional: track when accepted
+    // order.acceptedAt = new Date();
+
+    // Save and handle errors
+    const savedOrder = await order.save();
+
+    // Socket emit
     const io = req.app.get("io");
     if (io) {
-      io.to(`partner_${deliveryPartnerId}`).emit("orderAssigned", order);
-      io.to(`restaurant_${order.restaurantId}`).emit("orderStatusUpdated", order);
+      io.to(`partner_${deliveryPartnerId}`).emit("orderAssigned", savedOrder);
+      io.to(`restaurant_${order.restaurantId}`).emit("orderStatusUpdated", savedOrder);
     }
 
-    res.json({ success: true, message: "Order accepted", order });
-    
+    // Return updated order
+    res.json({ 
+      success: true, 
+      message: "Order accepted",
+      order: savedOrder 
+    });
+
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: err.message });
+    console.error("Accept order failed:", err);
+    res.status(500).json({ 
+      error: "Server error during accept",
+      details: err.message 
+    });
   }
 };
