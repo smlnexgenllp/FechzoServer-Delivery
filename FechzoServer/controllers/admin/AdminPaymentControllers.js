@@ -399,3 +399,73 @@ exports.getDashboardStats = async (req, res) => {
     });
   }
 };
+
+
+const Settings = require('../../models/Admin/Settings');
+
+// Save delivery partner payment settings
+exports.saveDeliveryPartnerPaymentSettings = async (req, res) => {
+  try {
+    const settingsData = req.body;
+
+    // Basic validation
+    if (!settingsData.baseAmount || !settingsData.perKmAmount || !settingsData.minimumPayout) {
+      return res.status(400).json({
+        success: false,
+        message: "Base amount, per km amount, and minimum payout are required"
+      });
+    }
+
+    const updatedSettings = await Settings.findOneAndUpdate(
+      { key: 'delivery_partner_payment' },
+      { value: settingsData, updatedAt: new Date() },
+      { upsert: true, new: true }
+    );
+
+    res.status(200).json({
+      success: true,
+      message: "Delivery partner payment settings updated successfully",
+      data: updatedSettings.value
+    });
+  } catch (error) {
+    console.error("Error saving delivery partner settings:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to save settings",
+      error: error.message
+    });
+  }
+};
+
+// Get current delivery partner payment settings
+exports.getDeliveryPartnerPaymentSettings = async (req, res) => {
+  try {
+    const settings = await Settings.findOne({ key: 'delivery_partner_payment' });
+
+    // Default values if no settings exist yet
+    const defaultSettings = {
+      baseAmount: 50,
+      perKmAmount: 10,
+      minimumPayout: 60,
+      peakHourBonus: 30,
+      nightSurcharge: 30,
+      badWeatherBonus: 25,
+      codExtraFee: 10,
+      isPeakHourActive: true,
+      peakHoursStart: "18:00",
+      peakHoursEnd: "23:00",
+    };
+
+    res.status(200).json({
+      success: true,
+      data: settings ? settings.value : defaultSettings
+    });
+  } catch (error) {
+    console.error("Error fetching delivery partner settings:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch settings",
+      error: error.message
+    });
+  }
+};

@@ -79,10 +79,13 @@ const getApprovedPartners = async (req, res) => {
     res.status(500).json({ message: "Server error" });
   }
 };
+
+
 module.exports = {
   checkDeliveryPartner,
   getPendingPartners,
    approvePartner,
-   getApprovedPartners, // 👈 export added
+   getApprovedPartners, 
+  
 };
   
