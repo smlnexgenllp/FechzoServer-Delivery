@@ -1,25 +1,39 @@
 const express = require("express");
 const router = express.Router();
 
+// Middleware imports
+const { verifyPartner } = require("../../middleware/auth/verifyPartner");
+const adminAuth = require("../../middleware/auth/adminAuth");
+
+// Controller imports (all functions must be exported from the controller)
 const {
   checkDeliveryPartner,
   getPendingPartners,
   approvePartner,
   getApprovedPartners,
+ 
 } = require("../../controllers/deliverypartner/deliveryPartner.controller");
 
-const adminAuth = require("../../middleware/auth/adminAuth");
+// ─────────────────────────────────────────────
+// Public / Partner routes
+// ─────────────────────────────────────────────
 
-// existing route
+// Check / register delivery partner
 router.post("/check", checkDeliveryPartner);
 
-// ADMIN – get pending partners
-router.get(
-  "/admin/pending",
-  adminAuth,
-  getPendingPartners
-);
+
+
+// ─────────────────────────────────────────────
+// Admin-only routes
+// ─────────────────────────────────────────────
+
+// Get all pending partners
+router.get("/admin/pending", adminAuth, getPendingPartners);
+
+// Get all approved partners
 router.get("/admin/approved", adminAuth, getApprovedPartners);
+
+// Approve a pending partner
 router.put("/admin/approve/:partnerId", adminAuth, approvePartner);
 
 module.exports = router;

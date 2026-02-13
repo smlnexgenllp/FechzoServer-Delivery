@@ -24,6 +24,7 @@ const orderSchema = new mongoose.Schema(
     restaurantId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Restaurant',
+      required: true,
     },
     restaurant: {
       type: mongoose.Schema.Types.ObjectId,
@@ -93,17 +94,37 @@ const orderSchema = new mongoose.Schema(
       type: String,
       default: 'placed',
     },
-
+    deliveryPartnerStatus: {
+      type: String,
+      enum: [
+        'pending',
+        'accepted',
+        'reached_restaurant',
+        'picked_up',
+        'reached_customer',
+        'delivered',
+        'failed',
+        'cancelled_by_partner',
+      ],
+      default: 'pending',
+      index: true,
+    },
     // 🔴 DELIVERY PARTNER INFO (NEW)
     delivery: {
       partnerId: {
         type: mongoose.Schema.Types.ObjectId,
-        ref: "DeliveryPartner",
+        ref: 'DeliveryPartner',
         default: null,
       },
       assignedAt: Date,
+      reachedRestaurantAt: Date,
       pickedUpAt: Date,
+      reachedCustomerAt: Date,
       deliveredAt: Date,
+      // NEW: For late delivery tracking
+      estimatedDeliveryTime: Date, // Set when partner accepts or picks up
+      delayReportedAt: Date,
+      delayReason: String, // e.g., "Heavy traffic", "Customer not reachable"
     },
 
     cancellationReason: {
@@ -112,6 +133,12 @@ const orderSchema = new mongoose.Schema(
         return this.orderStatus === 'cancelled';
       },
     },
+    cancelledBy: {
+      type: String,
+      enum: ['customer', 'restaurant', 'partner', 'system'],
+      default: null,
+    },
+    cancelledAt: Date,
 
     appliedOffers: [
       {

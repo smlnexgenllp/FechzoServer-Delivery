@@ -7,9 +7,13 @@ const {
   updateBranchApproval,
   getRestaurantName
 } = require('../../controllers/admin/restaurantControllers');
-
+const {
+  saveDeliveryPartnerPaymentSettings,
+  getDeliveryPartnerPaymentSettings
+} = require('../../controllers/admin/AdminPaymentControllers');
 const ratingController = require('../../controllers/admin/restaurantreviewControllers');
-
+// Import middleware (this line was missing for adminAuth)
+const adminAuth = require("../../middleware/auth/adminAuth");
 const offerRoutes = require('./adminOfferRoutes');
 const alertControllers = require('../../controllers/admin/restaurantAlertControllers');
 const orderController = require('../../controllers/admin/restaurantOrderControllers');
@@ -83,5 +87,6 @@ router.get('/paymentdaily', paymentManagemnt.getDailyPayments);
 router.get('/paymentmonthly', paymentManagemnt.getMonthlyPayments);
 router.get('/paymenthistory', paymentManagemnt.getPaymentHistory);
 router.post('/confirmPayment', paymentManagemnt.confirmPayment);
-
+router.post('/delivery-partner/payment-settings',saveDeliveryPartnerPaymentSettings);
+router.get('/delivery-partner/payment-settings',getDeliveryPartnerPaymentSettings);
 module.exports = router;
