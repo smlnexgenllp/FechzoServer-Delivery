@@ -3,6 +3,7 @@ const mongoose = require('mongoose');
 const Payment = require('../../../models/order/payment');
 const notificationController = require('../../restaurants/notificationController');
 const Restaurant = require('../../../models/restaurants/Restaurants');
+const Settings = require('../../../models/Admin/Settings');
 // Get all orders for a specific user
 exports.getUserOrders = async (req, res) => {
     try {
@@ -702,61 +703,440 @@ function deg2rad(deg) {
   return deg * (Math.PI / 180);
 }
 
-
 exports.acceptOrder = async (req, res) => {
   try {
-    const orderId = req.params.orderId;  // this is the string from URL (should be _id)
-    const deliveryPartnerId = req.partner.id;
+    const orderId = req.params.orderId; // should be _id
+    const partnerId = req.partner.id;
 
-    // IMPORTANT: Use _id instead of orderId unless you have a custom indexed orderId field
     const order = await Order.findOne({
-      _id: orderId,                           // ← change here
+      _id: orderId,
       orderStatus: "ready",
-      "delivery.partnerId": null              // ← keep if nested, or change to deliveryPartnerId: null
+      "delivery.partnerId": null,
     });
 
     if (!order) {
       return res.status(400).json({ 
-        error: "Order not found, already assigned, or not in 'ready' status" 
+        error: "Order not ready or already assigned" 
       });
     }
 
-    // Assign partner - use the SAME field name as in your schema!
-    // Option A - nested
-    order.delivery = order.delivery || {};
-    order.delivery.partnerId = deliveryPartnerId;
+    // Update ONLY delivery partner fields
+    order.deliveryPartnerStatus = "accepted";
+    order.delivery.partnerId = partnerId;
+    order.delivery.assignedAt = new Date();
 
-    // Option B - flat field (if that's what your schema has)
-    // order.deliveryPartnerId = deliveryPartnerId;
+    // VERY IMPORTANT: DO NOT CHANGE orderStatus here
+    // order.orderStatus remains "ready"
 
-    // Better status (don't jump to pickedUp)
-    order.orderStatus = "accepted";
+    await order.save();
 
-    // Optional: track when accepted
-    // order.acceptedAt = new Date();
-
-    // Save and handle errors
-    const savedOrder = await order.save();
-
-    // Socket emit
+    // Optional: notify restaurant
     const io = req.app.get("io");
     if (io) {
-      io.to(`partner_${deliveryPartnerId}`).emit("orderAssigned", savedOrder);
-      io.to(`restaurant_${order.restaurantId}`).emit("orderStatusUpdated", savedOrder);
+      io.to(order.restaurantId.toString()).emit("partnerAccepted", {
+        orderId: order._id,
+        message: `Delivery partner has accepted order ${order.orderId}`
+      });
     }
 
-    // Return updated order
     res.json({ 
       success: true, 
-      message: "Order accepted",
-      order: savedOrder 
+      message: "Order accepted - proceed to pickup",
+      order 
     });
 
   } catch (err) {
-    console.error("Accept order failed:", err);
+    res.status(500).json({ error: err.message });
+  }
+};
+exports.updatePartnerOrderStatus = async (req, res) => {
+  try {
+    const { orderId } = req.params;
+    const { status } = req.body; // 'picked_up', 'delivered', etc.
+    const partnerId = req.partner.id;
+
+    const order = await Order.findOne({
+      _id: orderId,
+      'delivery.partnerId': partnerId,
+    });
+
+    if (!order) {
+      return res.status(403).json({ error: 'Not your order or not found' });
+    }
+
+    const validPartnerStatuses = [
+      'accepted',
+      'reached_restaurant',
+      'picked_up',
+      'reached_customer',
+      'delivered',
+      'failed',
+    ];
+
+    if (!validPartnerStatuses.includes(status)) {
+      return res.status(400).json({ error: 'Invalid partner status' });
+    }
+
+    // Update partner status
+    order.deliveryPartnerStatus = status;
+
+    // Sync main orderStatus when appropriate
+    if (status === 'picked_up') {
+      order.orderStatus = 'pickedup';
+      order.delivery.pickedUpAt = new Date();
+    } else if (status === 'delivered') {
+      order.orderStatus = 'delivered';
+      order.delivery.deliveredAt = new Date();
+    } else if (status === 'reached_restaurant') {
+      order.delivery.reachedRestaurantAt = new Date();
+    } else if (status === 'reached_customer') {
+      order.delivery.reachedCustomerAt = new Date();
+    }
+
+    await order.save();
+
+    // Notify restaurant (optional but recommended)
+    const io = req.app.get('io');
+    if (io) {
+      io.to(order.restaurantId.toString()).emit('partnerStatusUpdated', {
+        orderId: order._id,
+        orderNumber: order.orderId,
+        partnerStatus: status,
+        mainStatus: order.orderStatus,
+      });
+    }
+
+    res.json({
+      success: true,
+      message: `Order status updated to ${status}`,
+      order,
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message });
+  }
+};
+// Get all orders assigned to the current delivery partner
+// Get all orders assigned to the current logged-in delivery partner
+exports.getMyActiveOrders = async (req, res) => {
+  try {
+    const partnerId = req.partner.id; // comes from verifyPartner middleware
+
+    const orders = await Order.find({
+      "delivery.partnerId": partnerId,
+      // Only show orders that are in progress (optional but recommended)
+      orderStatus: { $in: ["ready", "pickedup"] },
+      // or use deliveryPartnerStatus if you prefer stricter filter:
+      // deliveryPartnerStatus: { $in: ["accepted", "picked_up"] }
+    })
+      .populate("restaurantId", "restaurantName restaurantImage address phone")
+      .sort({ updatedAt: -1 }) // newest first
+      .lean();
+
+    res.status(200).json(orders);
+  } catch (err) {
+    console.error("Error fetching partner's active orders:", err);
     res.status(500).json({ 
-      error: "Server error during accept",
+      error: "Failed to load your active orders",
       details: err.message 
     });
+  }
+};
+exports.getPartnerOrderHistory = async (req, res) => {
+  try {
+    const partnerId = req.partner.id;
+    console.log("Fetching history for partner:", partnerId); // ← debug log
+
+    const orders = await Order.find({
+      "delivery.partnerId": partnerId,
+      $or: [
+        { orderStatus: "delivered" },
+        { orderStatus: "cancelled" },                    // matches your order
+        { deliveryPartnerStatus: "cancelled_by_partner" }, // extra safety
+        { deliveryPartnerStatus: "failed" }
+      ]
+    })
+      .populate("restaurantId", "restaurantName restaurantImage")
+      .sort({ updatedAt: -1 })
+      .lean();
+
+    console.log("Found orders:", orders.length); // ← debug log
+    if (orders.length > 0) {
+      console.log("First order:", orders[0]); // ← see if your order is here
+    }
+
+    res.status(200).json(orders);
+  } catch (err) {
+    console.error("History fetch error:", err);
+    res.status(500).json({ error: err.message });
+  }
+};
+// Partner cancels an assigned order (Zomato-style)
+exports.cancelOrderByPartner = async (req, res) => {
+  try {
+    const { orderId } = req.params;
+    const { reason } = req.body;
+    const partnerId = req.partner.id;
+
+    // Validate reason
+    const validReasons = [
+      "Restaurant closed or unavailable",
+      "Unable to contact restaurant",
+      "Order already picked up by another partner",
+      "Wrong/incomplete address",
+      "Traffic / too far / cannot deliver on time",
+      "Personal reason / emergency",
+      "Other"
+    ];
+
+    if (!reason || !validReasons.includes(reason)) {
+      return res.status(400).json({ 
+        error: "Invalid or missing cancellation reason" 
+      });
+    }
+
+    const order = await Order.findOne({
+      _id: orderId,
+      "delivery.partnerId": partnerId,
+      orderStatus: { $in: ["ready", "accepted"] }, // only allow cancel before pickup
+    });
+
+    if (!order) {
+      return res.status(403).json({ 
+        error: "Order not found, not assigned to you, or cannot be cancelled now" 
+      });
+    }
+
+    // Update order
+    order.orderStatus = "cancelled";
+    order.deliveryPartnerStatus = "cancelled_by_partner";
+    order.cancellationReason = `Cancelled by partner: ${reason}`;
+    order.cancelledBy = "partner";
+    order.cancelledAt = new Date();
+
+    // Reset assignment so another partner can take it
+    order.delivery.partnerId = null;
+    order.delivery.assignedAt = null;
+
+    await order.save();
+
+    // Optional: Notify restaurant
+    const io = req.app.get("io");
+    if (io && order.restaurantId) {
+      io.to(order.restaurantId.toString()).emit("orderCancelledByPartner", {
+        orderId: order._id,
+        orderNumber: order.orderId,
+        reason: order.cancellationReason,
+        message: "Delivery partner cancelled this order"
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      message: "Order cancelled successfully",
+      order
+    });
+  } catch (err) {
+    console.error("Partner cancel error:", err);
+    res.status(500).json({ error: "Failed to cancel order", details: err.message });
+  }
+};
+
+// Partner reports delay / late delivery
+exports.reportDelayByPartner = async (req, res) => {
+  try {
+    const { orderId } = req.params;
+    const { reason } = req.body;
+    const partnerId = req.partner.id;
+
+    if (!reason || reason.trim().length < 5) {
+      return res.status(400).json({ error: "Please provide a valid delay reason" });
+    }
+
+    const order = await Order.findOne({
+      _id: orderId,
+      "delivery.partnerId": partnerId,
+      orderStatus: { $in: ["ready", "pickedup"] }, // only allow reporting delay for active orders
+    });
+
+    if (!order) {
+      return res.status(403).json({ 
+        error: "Order not found or not assigned to you" 
+      });
+    }
+
+    // Update delay info
+    order.delivery.delayReportedAt = new Date();
+    order.delivery.delayReason = reason.trim();
+
+    await order.save();
+
+    // Optional: Notify restaurant / system
+    const io = req.app.get("io");
+    if (io && order.restaurantId) {
+      io.to(order.restaurantId.toString()).emit("partnerReportedDelay", {
+        orderId: order._id,
+        orderNumber: order.orderId,
+        reason: order.delivery.delayReason,
+        message: "Delivery partner reported delay for this order"
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      message: "Delay reported successfully",
+      order
+    });
+  } catch (err) {
+    console.error("Partner delay report error:", err);
+    res.status(500).json({ error: "Failed to report delay", details: err.message });
+  }
+};
+
+
+// Helper: Load payment settings with defaults
+const loadPaymentSettings = async () => {
+  const settingsDoc = await Settings.findOne({ key: 'delivery_partner_payment' });
+  return settingsDoc?.value || {
+    baseAmount: 90,           // your new base
+    perKmAmount: 10,
+    minimumPayout: 60,
+    peakHourBonus: 30,
+    nightSurcharge: 30,
+    badWeatherBonus: 25,
+    codExtraFee: 15,          // extra for COD
+    isPeakHourActive: true,
+  };
+};
+
+// Get today's earnings (fixed)
+exports.getTodayEarnings = async (req, res) => {
+  try {
+    const partnerId = req.partner?.id;
+    if (!partnerId) {
+      return res.status(401).json({ error: "No partner ID" });
+    }
+
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+
+    // Load real settings
+    const settings = await loadPaymentSettings();
+
+    const completedOrders = await Order.find({
+      "delivery.partnerId": partnerId,
+      orderStatus: "delivered",
+      updatedAt: { $gte: todayStart }
+    }).lean();
+
+    let totalEarnings = 0;
+    completedOrders.forEach(order => {
+      let payout = settings.baseAmount;
+
+      // Add COD extra if applicable
+      if (order.paymentMethod === 'cash') {
+        payout += settings.codExtraFee;
+      }
+
+      // Optional: Add distance-based (if you have distanceKm field)
+      // const distanceKm = order.distanceKm || 0;
+      // payout += distanceKm * settings.perKmAmount;
+
+      // Apply minimum payout
+      payout = Math.max(payout, settings.minimumPayout);
+
+      totalEarnings += payout;
+    });
+
+    res.json({
+      success: true,
+      todayEarnings: Math.round(totalEarnings),
+      completedDeliveries: completedOrders.length,
+      currency: "₹"
+    });
+  } catch (err) {
+    console.error("getTodayEarnings ERROR:", err);
+    res.status(500).json({ error: err.message });
+  }
+};
+
+// Get total lifetime earnings (fixed)
+exports.getTotalEarnings = async (req, res) => {
+  try {
+    const partnerId = req.partner.id;
+
+    const settings = await loadPaymentSettings();
+
+    const completedOrders = await Order.find({
+      "delivery.partnerId": partnerId,
+      orderStatus: "delivered"
+    }).lean();
+
+    let totalEarnings = 0;
+    completedOrders.forEach(order => {
+      let payout = settings.baseAmount;
+
+      if (order.paymentMethod === 'cash') {
+        payout += settings.codExtraFee;
+      }
+
+      // Optional distance
+      // payout += (order.distanceKm || 0) * settings.perKmAmount;
+
+      payout = Math.max(payout, settings.minimumPayout);
+      totalEarnings += payout;
+    });
+
+    res.json({
+      success: true,
+      totalEarnings: Math.round(totalEarnings),
+      totalDeliveries: completedOrders.length
+    });
+  } catch (err) {
+    res.status(500).json({ error: "Failed to fetch total earnings" });
+  }
+};
+
+// Get current month earnings (fixed)
+exports.getCurrentMonthEarnings = async (req, res) => {
+  try {
+    const partnerId = req.partner.id;
+
+    const settings = await loadPaymentSettings();
+
+    const now = new Date();
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    startOfMonth.setHours(0, 0, 0, 0);
+
+    const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+    endOfMonth.setHours(23, 59, 59, 999);
+
+    const completedOrders = await Order.find({
+      "delivery.partnerId": partnerId,
+      orderStatus: "delivered",
+      updatedAt: { $gte: startOfMonth, $lte: endOfMonth }
+    }).lean();
+
+    let monthlyEarnings = 0;
+    completedOrders.forEach(order => {
+      let payout = settings.baseAmount;
+
+      if (order.paymentMethod === 'cash') {
+        payout += settings.codExtraFee;
+      }
+
+      payout = Math.max(payout, settings.minimumPayout);
+      monthlyEarnings += payout;
+    });
+
+    res.json({
+      success: true,
+      monthlyEarnings: Math.round(monthlyEarnings),
+      monthlyDeliveries: completedOrders.length,
+      month: now.toLocaleString('default', { month: 'long', year: 'numeric' })
+    });
+  } catch (err) {
+    console.error("Error fetching monthly earnings:", err);
+    res.status(500).json({ error: err.message });
   }
 };

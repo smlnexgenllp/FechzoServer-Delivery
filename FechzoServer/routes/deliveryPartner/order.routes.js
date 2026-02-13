@@ -5,16 +5,25 @@ const verifyPartner = require("../../middleware/auth/verifyPartner");
 const {
   getAvailableOrders,
   acceptOrder,
-  updateOrderStatus
+  updateOrderStatus,
+  getMyActiveOrders,
+  updatePartnerOrderStatus,
+  getPartnerOrderHistory,
+  cancelOrderByPartner,
+  reportDelayByPartner,
+  getTodayEarnings,
+  getTotalEarnings,
+getCurrentMonthEarnings,
 } = require("../../controllers/food/orders/orderController");
-
-// Nearby orders
 router.get("/nearby-orders", verifyPartner, getAvailableOrders);
-
-// Accept an order
 router.post("/:orderId/accept", verifyPartner, acceptOrder);
-
-// Reject an order (or update status)
+router.patch("/:orderId/status", verifyPartner, updatePartnerOrderStatus);
 router.post("/:orderId/reject", verifyPartner, updateOrderStatus);
-
+router.get("/my-active", verifyPartner, getMyActiveOrders);
+router.get("/history", verifyPartner, getPartnerOrderHistory);
+router.post("/:orderId/cancel", verifyPartner, cancelOrderByPartner);
+router.patch("/:orderId/report-delay", verifyPartner, reportDelayByPartner);
+router.get('/earnings/today', verifyPartner, getTodayEarnings);
+router.get('/earnings/total', verifyPartner, getTotalEarnings);
+router.get('/earnings/month', verifyPartner, getCurrentMonthEarnings);
 module.exports = router;
