@@ -15,6 +15,7 @@ const {
   getTotalEarnings,
 getCurrentMonthEarnings,
 } = require("../../controllers/food/orders/orderController");
+
 router.get("/nearby-orders", verifyPartner, getAvailableOrders);
 router.post("/:orderId/accept", verifyPartner, acceptOrder);
 router.patch("/:orderId/status", verifyPartner, updatePartnerOrderStatus);
@@ -26,4 +27,6 @@ router.patch("/:orderId/report-delay", verifyPartner, reportDelayByPartner);
 router.get('/earnings/today', verifyPartner, getTodayEarnings);
 router.get('/earnings/total', verifyPartner, getTotalEarnings);
 router.get('/earnings/month', verifyPartner, getCurrentMonthEarnings);
+
+
 module.exports = router;
