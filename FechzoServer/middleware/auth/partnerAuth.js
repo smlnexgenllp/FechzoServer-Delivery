@@ -10,11 +10,11 @@ const partnerAuth = (req, res, next) => {
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
-    // 🔥 THIS IS REQUIRED
+    // 🔥 FIXED
     req.partner = {
-      id: decoded.id,
-      phone: decoded.phone,
-      role: decoded.role || "PARTNER",
+      _id: decoded._id,  // <-- use _id not id
+      email: decoded.email,
+      role: decoded.role,
     };
 
     next();

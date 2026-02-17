@@ -22,10 +22,13 @@ exports.sendPartnerEmailOtp = async (req, res) => {
 
   otpStore[email] = {
     otp,
-    expiresAt: Date.now() + 5 * 60 * 1000,
+    expiresAt: Date.now() + 5 * 60 * 1000, // 5 minutes
   };
 
   try {
+    // Check if partner already exists
+    const existingPartner = await DeliveryPartner.findOne({ email });
+
     await transporter.sendMail({
       from: process.env.EMAIL_USER,
       to: email,
@@ -33,7 +36,10 @@ exports.sendPartnerEmailOtp = async (req, res) => {
       text: `Your OTP is ${otp}. Valid for 5 minutes.`,
     });
 
-    res.status(200).json({ message: "OTP sent successfully" });
+    res.status(200).json({
+      message: "OTP sent successfully",
+      alreadyRegistered: !!existingPartner,   // true if exists, false if new
+    });
   } catch (err) {
     console.error("Email send error:", err);
     res.status(500).json({ message: "Failed to send OTP" });
@@ -76,10 +82,11 @@ exports.verifyPartnerEmailOtp = async (req, res) => {
     }
 
     const token = jwt.sign(
-      { id: partner._id, email: partner.email, role: "partner" },
-      process.env.JWT_SECRET,
-      { expiresIn: "7d" }
-    );
+  { _id: partner._id, email: partner.email, role: "partner" },
+  process.env.JWT_SECRET,
+  { expiresIn: "7d" }
+);
+
 
     delete otpStore[email];
 

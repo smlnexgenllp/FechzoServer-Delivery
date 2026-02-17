@@ -262,7 +262,62 @@ exports.cancelOrder = async (req, res) => {
         res.status(500).json({ error: 'Failed to cancel order', details: err.message });
     }
 };
+// Add this function to your controller file (orderController.js)
 
+// Get orders for the logged-in restaurant (with optional status & date filter)
+exports.getRestaurantOrders = async (req, res) => {
+  try {
+    const restaurantId = req.restaurant?._id; // ← from auth middleware (verifyRestaurant)
+    if (!restaurantId) {
+      return res.status(401).json({ success: false, message: "Restaurant not authenticated" });
+    }
+
+    const { status, date } = req.query; // status = 'preparing', 'ready', etc.   date = '2025-02-14'
+
+    let query = { restaurantId: new mongoose.Types.ObjectId(restaurantId) };
+
+    if (status && status !== 'all') {
+      query.orderStatus = status;
+    }
+
+    if (date) {
+      const start = new Date(date);
+      start.setHours(0, 0, 0, 0);
+      const end = new Date(date);
+      end.setHours(23, 59, 59, 999);
+      query.createdAt = { $gte: start, $lte: end };
+    }
+
+    const orders = await Order.find(query)
+      .populate({
+        path: 'delivery.partnerId',
+        select: 'fullName phone profileImage vehicleNumber rating totalDeliveries currentLocation',
+      })
+      .populate('restaurantId', 'restaurantName restaurantImage') // optional – if needed
+      .sort({ createdAt: -1 })
+      .lean();
+
+    // Optional: add calculated fields if needed
+    const enriched = orders.map(order => ({
+      ...order,
+      // You can add frontend-friendly fields here if you want
+      displayStatus: order.orderStatus === 'pickedUp' ? 'Picked Up' : order.orderStatus,
+    }));
+
+    res.status(200).json({
+      success: true,
+      orders: enriched,
+      count: enriched.length,
+    });
+  } catch (err) {
+    console.error('Error fetching restaurant orders:', err);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to load orders',
+      details: err.message,
+    });
+  }
+};
 // Get all refund requests for a restaurant
 exports.getRestaurantRefunds = async (req, res) => {
   try {
@@ -706,7 +761,7 @@ function deg2rad(deg) {
 exports.acceptOrder = async (req, res) => {
   try {
     const orderId = req.params.orderId; // should be _id
-    const partnerId = req.partner.id;
+    const partnerId = req.partner._id;
 
     const order = await Order.findOne({
       _id: orderId,
@@ -753,7 +808,7 @@ exports.updatePartnerOrderStatus = async (req, res) => {
   try {
     const { orderId } = req.params;
     const { status } = req.body; // 'picked_up', 'delivered', etc.
-    const partnerId = req.partner.id;
+    const partnerId = req.partner._id;
 
     const order = await Order.findOne({
       _id: orderId,
@@ -782,7 +837,7 @@ exports.updatePartnerOrderStatus = async (req, res) => {
 
     // Sync main orderStatus when appropriate
     if (status === 'picked_up') {
-      order.orderStatus = 'pickedup';
+      order.orderStatus = 'out_for_delivery';
       order.delivery.pickedUpAt = new Date();
     } else if (status === 'delivered') {
       order.orderStatus = 'delivered';
@@ -795,14 +850,16 @@ exports.updatePartnerOrderStatus = async (req, res) => {
 
     await order.save();
 
-    // Notify restaurant (optional but recommended)
+    // Notify restaurant
     const io = req.app.get('io');
     if (io) {
-      io.to(order.restaurantId.toString()).emit('partnerStatusUpdated', {
+      io.to(order.restaurantId.toString()).emit("partnerStatusUpdated", {
         orderId: order._id,
         orderNumber: order.orderId,
-        partnerStatus: status,
-        mainStatus: order.orderStatus,
+        deliveryPartnerStatus: status,           // ← fixed here
+        mainOrderStatus: order.orderStatus,
+        partnerName: req.partner.fullName || '—',
+        partnerPhone: req.partner.phone || '—',
       });
     }
 
@@ -820,17 +877,17 @@ exports.updatePartnerOrderStatus = async (req, res) => {
 // Get all orders assigned to the current logged-in delivery partner
 exports.getMyActiveOrders = async (req, res) => {
   try {
-    const partnerId = req.partner.id; // comes from verifyPartner middleware
+    const partnerId = req.partner._id; // or req.partner._id — make sure it's consistent
 
     const orders = await Order.find({
       "delivery.partnerId": partnerId,
-      // Only show orders that are in progress (optional but recommended)
-      orderStatus: { $in: ["ready", "pickedup"] },
-      // or use deliveryPartnerStatus if you prefer stricter filter:
-      // deliveryPartnerStatus: { $in: ["accepted", "picked_up"] }
+      deliveryPartnerStatus: { 
+        $in: ["accepted", "reached_restaurant", "picked_up", "reached_customer"] 
+      },
+      orderStatus: { $nin: ["delivered", "cancelled"] }   // exclude finished/cancelled
     })
       .populate("restaurantId", "restaurantName restaurantImage address phone")
-      .sort({ updatedAt: -1 }) // newest first
+      .sort({ updatedAt: -1 })
       .lean();
 
     res.status(200).json(orders);
@@ -842,41 +899,38 @@ exports.getMyActiveOrders = async (req, res) => {
     });
   }
 };
+
 exports.getPartnerOrderHistory = async (req, res) => {
   try {
-    const partnerId = req.partner.id;
-    console.log("Fetching history for partner:", partnerId); // ← debug log
+    const partnerId = req.partner._id || req.partner.id;
+
+    if (!partnerId) {
+      return res.status(401).json({ message: "Partner not authenticated" });
+    }
+
+    console.log("History for partner:", partnerId);
 
     const orders = await Order.find({
-      "delivery.partnerId": partnerId,
-      $or: [
-        { orderStatus: "delivered" },
-        { orderStatus: "cancelled" },                    // matches your order
-        { deliveryPartnerStatus: "cancelled_by_partner" }, // extra safety
-        { deliveryPartnerStatus: "failed" }
-      ]
+      "delivery.partnerId": new mongoose.Types.ObjectId(partnerId),
+      orderStatus: { $in: ["delivered", "Cancelled"] }
     })
-      .populate("restaurantId", "restaurantName restaurantImage")
       .sort({ updatedAt: -1 })
       .lean();
 
-    console.log("Found orders:", orders.length); // ← debug log
-    if (orders.length > 0) {
-      console.log("First order:", orders[0]); // ← see if your order is here
-    }
-
     res.status(200).json(orders);
-  } catch (err) {
-    console.error("History fetch error:", err);
-    res.status(500).json({ error: err.message });
+
+  } catch (error) {
+    console.error("History error:", error);
+    res.status(500).json({ message: error.message });
   }
 };
+
 // Partner cancels an assigned order (Zomato-style)
 exports.cancelOrderByPartner = async (req, res) => {
   try {
     const { orderId } = req.params;
     const { reason } = req.body;
-    const partnerId = req.partner.id;
+    const partnerId = req.partner._id;
 
     // Validate reason
     const validReasons = [
@@ -947,7 +1001,7 @@ exports.reportDelayByPartner = async (req, res) => {
   try {
     const { orderId } = req.params;
     const { reason } = req.body;
-    const partnerId = req.partner.id;
+    const partnerId = req.partner._id;
 
     if (!reason || reason.trim().length < 5) {
       return res.status(400).json({ error: "Please provide a valid delay reason" });
@@ -1012,7 +1066,7 @@ const loadPaymentSettings = async () => {
 // Get today's earnings (fixed)
 exports.getTodayEarnings = async (req, res) => {
   try {
-    const partnerId = req.partner?.id;
+    const partnerId = req.partner?._id;
     if (!partnerId) {
       return res.status(401).json({ error: "No partner ID" });
     }
@@ -1063,7 +1117,7 @@ exports.getTodayEarnings = async (req, res) => {
 // Get total lifetime earnings (fixed)
 exports.getTotalEarnings = async (req, res) => {
   try {
-    const partnerId = req.partner.id;
+    const partnerId = req.partner._id;
 
     const settings = await loadPaymentSettings();
 
@@ -1100,7 +1154,7 @@ exports.getTotalEarnings = async (req, res) => {
 // Get current month earnings (fixed)
 exports.getCurrentMonthEarnings = async (req, res) => {
   try {
-    const partnerId = req.partner.id;
+    const partnerId = req.partner._id;
 
     const settings = await loadPaymentSettings();
 
@@ -1138,5 +1192,105 @@ exports.getCurrentMonthEarnings = async (req, res) => {
   } catch (err) {
     console.error("Error fetching monthly earnings:", err);
     res.status(500).json({ error: err.message });
+  }
+};
+
+exports.getRecentEarnings = async (req, res) => {
+  try {
+    const partnerId = req.partner?._id;
+    if (!partnerId) {
+      return res.status(401).json({ 
+        success: false, 
+        message: "Partner not authenticated" 
+      });
+    }
+
+    const days = parseInt(req.query.days) || 7;
+    if (days < 1 || days > 90) {
+      return res.status(400).json({ success: false, message: "Invalid days parameter" });
+    }
+
+    const settings = await loadPaymentSettings();
+
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() - days + 1);
+    startDate.setHours(0, 0, 0, 0);
+
+    // Fetch only delivered orders for this partner in the date range
+    const deliveredOrders = await Order.find({
+      "delivery.partnerId": partnerId,
+      orderStatus: "delivered",
+      "delivery.deliveredAt": { $gte: startDate }
+    })
+      .select("delivery.deliveredAt paymentMethod distanceKm total") // minimal fields
+      .lean();
+
+    // Group by day
+    const dailyData = {};
+    
+    // Initialize all days (even with 0 earnings)
+    for (let i = 0; i < days; i++) {
+      const date = new Date(startDate);
+      date.setDate(startDate.getDate() + i);
+      const dateStr = date.toISOString().split("T")[0]; // YYYY-MM-DD
+      dailyData[dateStr] = { amount: 0, deliveries: 0 };
+    }
+
+    // Calculate earnings per order
+    deliveredOrders.forEach(order => {
+      if (!order.delivery?.deliveredAt) return; // safety check
+
+      const dateStr = new Date(order.delivery.deliveredAt)
+        .toISOString()
+        .split("T")[0];
+
+      let payout = settings.baseAmount || 90;
+
+      if (order.paymentMethod === "cash") {
+        payout += settings.codExtraFee || 15;
+      }
+
+      // Add distance bonus only if you actually store distanceKm
+      // if (order.distanceKm && !isNaN(order.distanceKm)) {
+      //   payout += order.distanceKm * (settings.perKmAmount || 10);
+      // }
+
+      // Apply minimum
+      payout = Math.max(payout, settings.minimumPayout || 60);
+
+      if (dailyData[dateStr]) {
+        dailyData[dateStr].amount += payout;
+        dailyData[dateStr].deliveries += 1;
+      }
+    });
+
+    // Build response array - newest first
+    const recent = [];
+    for (let i = days - 1; i >= 0; i--) {
+      const date = new Date(startDate);
+      date.setDate(startDate.getDate() + i);
+      const dateStr = date.toISOString().split("T")[0];
+
+      recent.push({
+        date: dateStr,
+        amount: Math.round(dailyData[dateStr]?.amount || 0),
+        deliveries: dailyData[dateStr]?.deliveries || 0
+      });
+    }
+
+    res.json({
+      success: true,
+      recent,
+      queryDays: days,
+      partnerId: partnerId.toString()
+    });
+
+  } catch (err) {
+    console.error("getRecentEarnings error:", err);
+    res.status(500).json({
+      success: false,
+      message: "Failed to load recent earnings",
+      error: err.message
+    });
   }
 };
