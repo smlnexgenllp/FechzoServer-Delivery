@@ -11,7 +11,7 @@ router.get("/dashboard", verifyPartner, (req, res) => {
     success: true,
     message: "Welcome to partner dashboard",
     partner: {
-      id: req.partner.id,
+      id: req.partner._id,
       email: req.partner.email,
       role: req.partner.role,
     },

@@ -2,7 +2,7 @@ const express = require("express");
 const router = express.Router();
 
 // Middleware imports
-const { verifyPartner } = require("../../middleware/auth/verifyPartner");
+const  verifyPartner  = require("../../middleware/auth/verifyPartner");
 const adminAuth = require("../../middleware/auth/adminAuth");
 
 // Controller imports (all functions must be exported from the controller)
@@ -11,16 +11,23 @@ const {
   getPendingPartners,
   approvePartner,
   getApprovedPartners,
- 
+  getMyProfile,
+  updateMyProfile,
+  uploadDocument,
+  getPartnerDocuments,
 } = require("../../controllers/deliverypartner/deliveryPartner.controller");
-
 // ─────────────────────────────────────────────
 // Public / Partner routes
 // ─────────────────────────────────────────────
-
 // Check / register delivery partner
-router.post("/check", checkDeliveryPartner);
 
+router.post("/check", checkDeliveryPartner);
+router.get("/profile",verifyPartner, getMyProfile);
+// PATCH /api/delivery-partner/profile
+router.patch("/profile", verifyPartner, updateMyProfile);
+router.post("/documents/upload", verifyPartner, uploadDocument);
+router.get('/documents', verifyPartner, getPartnerDocuments);
+// Get own profile (partner authenticated)
 
 
 // ─────────────────────────────────────────────

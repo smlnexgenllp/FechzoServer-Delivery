@@ -3,7 +3,7 @@ const Payment = require("../../../models/order/payment");
 const Restaurant = require("../../../models/restaurants/shops/RestaurantDetails");
 const notificationController = require("../../restaurants/notificationController");
 
-// Utility to map order with payment details
+// Utility to map order with payment details – NOW INCLUDES delivery & partner status
 function mapOrder(order, payment = null) {
   return {
     id: order._id,
@@ -41,6 +41,17 @@ function mapOrder(order, payment = null) {
     })),
     total: order.total,
     status: order.orderStatus,
+    deliveryPartnerStatus: order.deliveryPartnerStatus || null,     // ← ADDED
+    delivery: order.delivery
+      ? {
+          partnerId: order.delivery.partnerId,
+          assignedAt: order.delivery.assignedAt,
+          reachedRestaurantAt: order.delivery.reachedRestaurantAt,
+          pickedUpAt: order.delivery.pickedUpAt,
+          reachedCustomerAt: order.delivery.reachedCustomerAt,
+          deliveredAt: order.delivery.deliveredAt,
+        }
+      : null,                                                       // ← ADDED
     createdAt: order.createdAt
       ? order.createdAt.toISOString()
       : new Date().toISOString(),
@@ -53,8 +64,8 @@ function mapOrder(order, payment = null) {
     restaurantAdminTransactionStatus: payment
       ? payment.restaurantAdminTransactionStatus
       : "N/A",
-    orderSummary: payment ? payment.orderSummary : [], // Include orderSummary from Payment model
-    appliedOffers: payment ? payment.appliedOffers : [], // Add this line
+    orderSummary: payment ? payment.orderSummary : [],
+    appliedOffers: payment ? payment.appliedOffers : [],
     cancellationReason: order.cancellationReason || "",
     time: order.createdAt
       ? order.createdAt.toISOString()
@@ -81,14 +92,17 @@ exports.getKitchenOrders = async (req, res) => {
         "createdAt",
         "specialInstructions",
         "paymentMethod",
-        "appliedOffers" // Add this line
-      ]);
+        "appliedOffers",
+        "delivery",                    // ← ADDED – critical
+        "deliveryPartnerStatus",       // ← ADDED – critical
+      ])
+      .lean();
 
     // Fetch payment details for each order
     const mappedOrders = await Promise.all(
       orders.map(async (order) => {
         const payment = await Payment.findOne({ orderId: order.orderId })
-          .populate('appliedOffers.offerId'); // Add this line to populate offer details
+          .populate('appliedOffers.offerId');
         return mapOrder(order, payment);
       })
     );
@@ -104,7 +118,6 @@ exports.getKitchenOrders = async (req, res) => {
   }
 };
 
-// Update the valid statuses in getAllOrders
 exports.getAllOrders = async (req, res) => {
   try {
     const restaurantId = req.headers["restaurant-id"];
@@ -138,9 +151,11 @@ exports.getAllOrders = async (req, res) => {
         "specialInstructions",
         "paymentMethod",
         "cancellationReason",
-      ]);
+        "delivery",                    // ← ADDED
+        "deliveryPartnerStatus",       // ← ADDED
+      ])
+      .lean();
 
-    // Fetch payment details for each order
     const mappedOrders = await Promise.all(
       orders.map(async (order) => {
         const payment = await Payment.findOne({ orderId: order.orderId });
@@ -159,7 +174,7 @@ exports.getAllOrders = async (req, res) => {
   }
 };
 
-// Update order status (unchanged)
+// Update order status (unchanged, but included for completeness)
 exports.updateKitchenOrderStatus = async (req, res) => {
   try {
     const { orderId } = req.params;
@@ -172,7 +187,6 @@ exports.updateKitchenOrderStatus = async (req, res) => {
         .json({ success: false, message: "Restaurant ID is required" });
     }
 
-    // Update valid status array
     if (
       ![
         "preparing",
@@ -223,7 +237,6 @@ exports.updateKitchenOrderStatus = async (req, res) => {
           { orderId: order.orderId },
           {
             paymentStatus: "completed",
-            // Also update the restaurantAdminTransactionStatus
             restaurantAdminTransactionStatus: "completed",
           },
           { new: true }
@@ -234,7 +247,6 @@ exports.updateKitchenOrderStatus = async (req, res) => {
       }
     }
 
-    // Fetch updated payment details
     const updatedPayment = await Payment.findOne({ orderId: order.orderId });
 
     const io = req.app.get("io");
@@ -284,6 +296,7 @@ exports.updateKitchenOrderStatus = async (req, res) => {
   }
 };
 
+// getOrderHistory – also updated to include delivery fields
 exports.getOrderHistory = async (req, res) => {
   try {
     const restaurantId = req.headers["restaurant-id"];
@@ -311,7 +324,6 @@ exports.getOrderHistory = async (req, res) => {
 
     end.setHours(23, 59, 59, 999);
 
-    // Fetch orders
     const skip = (parseInt(page) - 1) * parseInt(limit);
     const orders = await Order.find({
       restaurantId,
@@ -341,9 +353,12 @@ exports.getOrderHistory = async (req, res) => {
         "specialInstructions",
         "paymentMethod",
         "cancellationReason",
-      ]);
+        "delivery",                    // ← ADDED
+        "deliveryPartnerStatus",       // ← ADDED
+      ])
+      .lean();
 
-    // Compute aggregated stats
+    // Stats (unchanged)
     const allOrders = await Order.find({
       restaurantId,
       createdAt: { $gte: start, $lte: end },
@@ -360,21 +375,16 @@ exports.getOrderHistory = async (req, res) => {
       },
     });
 
-    // Update stats calculation
     const stats = {
       totalOrders: allOrders.length,
-      completedCount: allOrders.filter(
-        (order) => order.orderStatus === "delivered"
-      ).length,
-      cancelledCount: allOrders.filter(
-        (order) => order.orderStatus === "cancelled"
-      ).length,
+      completedCount: allOrders.filter((o) => o.orderStatus === "delivered").length,
+      cancelledCount: allOrders.filter((o) => o.orderStatus === "cancelled").length,
       totalRevenue: allOrders
-        .filter((order) => order.orderStatus === "delivered")
-        .reduce((sum, order) => sum + (order.total || 0), 0),
+        .filter((o) => o.orderStatus === "delivered")
+        .reduce((sum, o) => sum + (o.total || 0), 0),
     };
 
-    const totalOrders = await Order.countDocuments({
+    const totalOrdersCount = await Order.countDocuments({
       restaurantId,
       createdAt: { $gte: start, $lte: end },
       orderStatus: {
@@ -390,7 +400,6 @@ exports.getOrderHistory = async (req, res) => {
       },
     });
 
-    // Map orders with payment details
     const mappedOrders = await Promise.all(
       orders.map(async (order) => {
         const payment = await Payment.findOne({ orderId: order.orderId });
@@ -399,20 +408,19 @@ exports.getOrderHistory = async (req, res) => {
     );
 
     console.log(
-      `getOrderHistory: Fetched ${mappedOrders.length} orders for restaurant ${restaurantId}, stats:`,
-      stats
+      `getOrderHistory: Fetched ${mappedOrders.length} orders for restaurant ${restaurantId}`
     );
 
     res.json({
       success: true,
       data: mappedOrders,
       pagination: {
-        totalOrders,
+        totalOrders: totalOrdersCount,
         currentPage: parseInt(page),
-        totalPages: Math.ceil(totalOrders / parseInt(limit)),
+        totalPages: Math.ceil(totalOrdersCount / parseInt(limit)),
         limit: parseInt(limit),
       },
-      stats, // Include computed stats
+      stats,
     });
   } catch (error) {
     console.error("Error fetching order history:", error);
@@ -424,12 +432,11 @@ exports.getOrderHistory = async (req, res) => {
   }
 };
 
-// Update the getRestaurantDetailsForOrder function
+// getRestaurantDetailsForOrder – unchanged, but included for completeness
 exports.getRestaurantDetailsForOrder = async (req, res) => {
   try {
-    const { orderId } = req.params; // Change from restaurantId to orderId
+    const { orderId } = req.params;
 
-    // First find the order to get restaurantId
     const order = await Order.findOne({ orderId });
     if (!order) {
       return res.status(404).json({
@@ -438,7 +445,6 @@ exports.getRestaurantDetailsForOrder = async (req, res) => {
       });
     }
 
-    // Then find restaurant details using restaurantId from order
     const restaurant = await Restaurant.findOne(
       { _id: order.restaurantId },
       {
@@ -488,7 +494,7 @@ exports.getRestaurantDetailsForOrder = async (req, res) => {
   }
 };
 
-// Add these helper functions at the end of the file
+// Helper functions (unchanged)
 function getStatusMessage(status, orderId) {
   const messages = {
     preparing: `Order #${orderId} is now being prepared`,
@@ -524,3 +530,4 @@ function getIconForStatus(status) {
   };
   return icons[status] || "FaCircleInfo";
 }
+
