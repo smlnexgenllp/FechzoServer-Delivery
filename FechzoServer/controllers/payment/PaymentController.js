@@ -276,13 +276,18 @@ exports.createOrder = async (req, res) => {
         orderSummary,
         appliedOffers
       };
-
+      
       // Razorpay order for non-cash
+      const razorpayAmount = Math.round(parseFloat(amount) * 100); // 21946
+
+if (razorpayAmount <= 0) {
+  return res.status(400).json({ error: "Invalid order amount" });
+}
       if (paymentMethod !== "cash") {
         const options = { 
-          amount: Math.round(parseFloat(amount) * 100), 
-          currency: "INR", 
-          receipt: `receipt_order_${Date.now()}` 
+          amount: razorpayAmount,
+  currency: "INR",
+  receipt: `receipt_${orderId || Date.now()}` 
         };
         const razorpayOrder = await razorpayInstance.orders.create(options);
         paymentData.razorpayOrderId = razorpayOrder.id;
