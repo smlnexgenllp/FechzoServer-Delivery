@@ -95,21 +95,58 @@ const getApprovedPartners = async (req, res) => {
 
 const getMyProfile = async (req, res) => {
   try {
-    // req.partner comes from verifyPartner middleware
-    const partner = await DeliveryPartner.findById(req.partner._id);
-
+    const partner = await DeliveryPartner.findById(req.partner._id)
+      .select(
+        'fullName email phone profileImage rating totalRatings ' +
+        'vehicleNumber vehicleType licenseNumber ' +
+        'bankName accountNumber ifsc ' +                     // ← ADD THESE
+        'isActive approvalStatus onboardingCompleted documentsSubmitted ' +
+        'city area createdAt lastActive'
+      )
+      .lean();
 
     if (!partner) {
-      return res.status(404).json({ message: "Profile not found" });
+      return res.status(404).json({ success: false, message: 'Profile not found' });
     }
+
+    const profile = {
+      fullName: partner.fullName || '—',
+      email: partner.email || '—',
+      phone: partner.phone || '—',
+      profileImage: partner.profileImage || null,
+      rating: partner.rating ? Number(partner.rating).toFixed(1) : '0.0',
+      totalRatings: partner.totalRatings || 0,
+      vehicleNumber: partner.vehicleNumber || 'Not set',
+      vehicleType: partner.vehicleType || 'Not set',
+      licenseNumber: partner.licenseNumber || 'Not set',
+      // Masked bank details (Zomato style)
+      bankName: partner.bankName || '—',
+      accountNumber: partner.accountNumber
+        ? `••••••••${partner.accountNumber.slice(-4)}`   // shows ••••••••6766
+        : 'Not linked',
+      ifsc: partner.ifsc ? `••••${partner.ifsc.slice(-4)}` : '—',
+      city: partner.city || '—',
+      area: partner.area || '—',
+      isActive: !!partner.isActive,
+      approvalStatus: partner.approvalStatus || 'PENDING',
+      onboardingCompleted: !!partner.onboardingCompleted,
+      documentsSubmitted: !!partner.documentsSubmitted,
+      joinedOn: partner.createdAt
+        ? new Date(partner.createdAt).toLocaleDateString('en-IN', {
+            year: 'numeric',
+            month: 'long',
+            day: 'numeric',
+          })
+        : '—',
+    };
 
     res.status(200).json({
       success: true,
-      partner,
+      profile,
     });
   } catch (err) {
-    console.error("getMyProfile error:", err);
-    res.status(500).json({ message: "Server error" });
+    console.error('getMyProfile error:', err.stack);
+    res.status(500).json({ success: false, message: 'Failed to fetch profile' });
   }
 };
 // UPDATE: Partner updates their own profile (PATCH /profile)

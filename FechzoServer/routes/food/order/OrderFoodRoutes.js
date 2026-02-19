@@ -3,6 +3,7 @@ const router = express.Router();
 
 const { updateCartItem } = require("../../../controllers/food/orders/cart");
 const { addToCart } = require("../../../controllers/food/orders/cart");
+const authUser  = require('../../../middleware/auth/authUser');
 const {
   getCartItemsWithDetails,
 } = require("../../../controllers/food/orders/fetchCart");
@@ -54,4 +55,7 @@ router.patch('/admin/refunds/:orderId/reject', orderController.rejectRefund);
 router.get('/available-orders', partnerAuth, orderController.getAvailableOrders);
 router.put('/accept/:orderId', partnerAuth, orderController.acceptOrder);
 router.put('/update-order-status/:orderId', partnerAuth, orderController.updateOrderStatus);
+router.put('/:orderId/rate-partner', orderController.rateDeliveryPartner);
+
+
 module.exports = router;

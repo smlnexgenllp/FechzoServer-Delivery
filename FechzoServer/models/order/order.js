@@ -150,7 +150,22 @@ const orderSchema = new mongoose.Schema(
         appliedAt: { type: Date, default: Date.now },
       },
     ],
-
+     // In models/order/order.js
+partnerRating: {
+  type: Number,
+  min: 1,
+  max: 5,
+  default: null
+},
+partnerReview: {
+  type: String,
+  trim: true,
+  default: null
+},
+partnerRatedAt: {
+  type: Date,
+  default: null
+},
     refundStatus: {
       type: String,
       enum: ['pending', 'approved', 'sent_to_admin', 'completed', 'rejected'],

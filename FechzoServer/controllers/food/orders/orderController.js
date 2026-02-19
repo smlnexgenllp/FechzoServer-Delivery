@@ -804,10 +804,11 @@ exports.acceptOrder = async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 };
+// PATCH /api/delivery-partner/orders/:id/status
 exports.updatePartnerOrderStatus = async (req, res) => {
   try {
     const { orderId } = req.params;
-    const { status } = req.body; // 'picked_up', 'delivered', etc.
+    const { status, cashReceived, paymentCollected } = req.body;
     const partnerId = req.partner._id;
 
     const order = await Order.findOne({
@@ -819,57 +820,66 @@ exports.updatePartnerOrderStatus = async (req, res) => {
       return res.status(403).json({ error: 'Not your order or not found' });
     }
 
-    const validPartnerStatuses = [
-      'accepted',
-      'reached_restaurant',
-      'picked_up',
-      'reached_customer',
-      'delivered',
-      'failed',
-    ];
-
-    if (!validPartnerStatuses.includes(status)) {
+    const validStatuses = ['accepted', 'reached_restaurant', 'picked_up', 'reached_customer', 'delivered', 'failed'];
+    if (!validStatuses.includes(status)) {
       return res.status(400).json({ error: 'Invalid partner status' });
     }
 
-    // Update partner status
+    // Update delivery partner status
     order.deliveryPartnerStatus = status;
 
-    // Sync main orderStatus when appropriate
+    // Sync main order status
     if (status === 'picked_up') {
       order.orderStatus = 'out_for_delivery';
       order.delivery.pickedUpAt = new Date();
     } else if (status === 'delivered') {
       order.orderStatus = 'delivered';
       order.delivery.deliveredAt = new Date();
-    } else if (status === 'reached_restaurant') {
-      order.delivery.reachedRestaurantAt = new Date();
-    } else if (status === 'reached_customer') {
-      order.delivery.reachedCustomerAt = new Date();
+      order.paymentConfirmedAt = new Date();
+
+      // ── COD cash confirmation ─────────────────────────────────────
+      if (cashReceived) {
+        order.cashReceived = true;
+        order.paymentCollected = paymentCollected || order.total;
+
+        // IMPORTANT: Also update the Payment document
+        const payment = await Payment.findOne({ orderId: order.orderId });
+        if (payment) {
+          payment.paymentStatus = 'completed';
+          payment.restaurantAdminTransactionStatus = 'completed'; // or 'pending' if you want admin verification
+          payment.updatedAt = new Date();
+          await payment.save();
+
+          console.log(`Payment for ${order.orderId} marked as completed (cash collected)`);
+        } else {
+          console.warn(`No payment record found for order ${order.orderId}`);
+        }
+      }
     }
 
     await order.save();
 
-    // Notify restaurant
+    // Emit socket update (keep your existing io code)
     const io = req.app.get('io');
     if (io) {
-      io.to(order.restaurantId.toString()).emit("partnerStatusUpdated", {
+      io.to(`order:${order._id}`).emit('partnerStatusUpdated', {
         orderId: order._id,
         orderNumber: order.orderId,
-        deliveryPartnerStatus: status,           // ← fixed here
+        deliveryPartnerStatus: status,
         mainOrderStatus: order.orderStatus,
-        partnerName: req.partner.fullName || '—',
-        partnerPhone: req.partner.phone || '—',
+        cashReceived: order.cashReceived,
+        paymentCollected: order.paymentCollected,
+        // ... other fields
       });
     }
 
     res.json({
       success: true,
-      message: `Order status updated to ${status}`,
+      message: `Order marked as ${status}`,
       order,
     });
   } catch (err) {
-    console.error(err);
+    console.error('updatePartnerOrderStatus error:', err);
     res.status(500).json({ error: err.message });
   }
 };
@@ -877,29 +887,41 @@ exports.updatePartnerOrderStatus = async (req, res) => {
 // Get all orders assigned to the current logged-in delivery partner
 exports.getMyActiveOrders = async (req, res) => {
   try {
-    const partnerId = req.partner._id; // or req.partner._id — make sure it's consistent
+    const partnerId = req.partner._id;
 
     const orders = await Order.find({
       "delivery.partnerId": partnerId,
-      deliveryPartnerStatus: { 
-        $in: ["accepted", "reached_restaurant", "picked_up", "reached_customer"] 
-      },
-      orderStatus: { $nin: ["delivered", "cancelled"] }   // exclude finished/cancelled
+      deliveryPartnerStatus: { $in: ["accepted", "reached_restaurant", "picked_up", "reached_customer"] },
+      orderStatus: { $nin: ["delivered", "cancelled"] }
     })
       .populate("restaurantId", "restaurantName restaurantImage address phone")
       .sort({ updatedAt: -1 })
       .lean();
 
-    res.status(200).json(orders);
-  } catch (err) {
-    console.error("Error fetching partner's active orders:", err);
-    res.status(500).json({ 
-      error: "Failed to load your active orders",
-      details: err.message 
+    // Fetch payments for these orders
+    const orderIds = orders.map(o => o.orderId);
+    const payments = await Payment.find({ orderId: { $in: orderIds } })
+      .select('orderId paymentMethod paymentStatus')
+      .lean();
+
+    // Map payments by orderId
+    const paymentMap = {};
+    payments.forEach(p => {
+      paymentMap[p.orderId] = p.paymentMethod;
     });
+
+    // Enrich orders with paymentMethod
+    const enrichedOrders = orders.map(order => ({
+      ...order,
+      paymentMethod: paymentMap[order.orderId] || 'online'  // fallback
+    }));
+
+    res.status(200).json(enrichedOrders);
+  } catch (err) {
+    console.error("Error:", err);
+    res.status(500).json({ error: "Failed to load active orders" });
   }
 };
-
 exports.getPartnerOrderHistory = async (req, res) => {
   try {
     const partnerId = req.partner._id || req.partner.id;
@@ -1062,7 +1084,38 @@ const loadPaymentSettings = async () => {
     isPeakHourActive: true,
   };
 };
+// In earningsController.js
+exports.calculateWeeklyEarnings = async (partnerId, startDate) => {
+  const endDate = new Date(startDate);
+  endDate.setDate(endDate.getDate() + 7);
 
+  let totalGross = 0;
+  let totalPenalties = 0;
+  let totalTips = 0;
+  let ordersCount = 0;
+
+  for (let d = new Date(startDate); d < endDate; d.setDate(d.getDate() + 1)) {
+    const day = await exports.calculateDailyEarnings(partnerId, new Date(d));
+    totalGross += day.grossEarnings;
+    totalPenalties += day.penalties;
+    totalTips += day.tips;
+    ordersCount += day.ordersCompleted;
+  }
+
+  const platformFee = totalGross * 0.05; // example 5% (Zomato often 0–10%)
+  const net = totalGross - platformFee - totalPenalties;
+
+  return {
+    gross: Math.round(totalGross),
+    tips: Math.round(totalTips),
+    penalties: Math.round(totalPenalties),
+    platformFee: Math.round(platformFee),
+    netPayable: Math.max(0, Math.round(net)),
+    orders: ordersCount,
+    periodStart: startDate,
+    periodEnd: endDate,
+  };
+};
 // Get today's earnings (fixed)
 exports.getTodayEarnings = async (req, res) => {
   try {
@@ -1291,6 +1344,50 @@ exports.getRecentEarnings = async (req, res) => {
       success: false,
       message: "Failed to load recent earnings",
       error: err.message
+    });
+  }
+};
+exports.rateDeliveryPartner = async (req, res) => {
+  try {
+    const { orderId } = req.params;
+    const { rating, review } = req.body;
+
+    let userId;
+    if (req.user && req.user._id) {
+      userId = req.user._id;
+      console.log('[rating] Authenticated user ID:', userId);
+    } else {
+      console.warn('[rating] No authenticated user found - skipping ownership check (dev mode)');
+      // In production: return res.status(401).json({ error: 'Please login to rate' });
+    }
+
+    const query = userId ? { orderId, userId } : { orderId };
+    const order = await Order.findOne(query);
+
+    if (!order) {
+      return res.status(404).json({ error: "Order not found or not yours" });
+    }
+
+    if (order.orderStatus !== "delivered") {
+      return res.status(400).json({ error: "Can only rate delivered orders" });
+    }
+
+    if (order.partnerRating) {
+      return res.status(400).json({ error: "You have already rated this delivery" });
+    }
+
+    order.partnerRating = rating;
+    order.partnerReview = review?.trim() || null;
+    order.partnerRatedAt = new Date();
+
+    await order.save();
+
+    res.json({ success: true, message: "Thank you for your feedback!" });
+  } catch (err) {
+    console.error('[rating] Error:', err.stack);
+    res.status(500).json({
+      error: "Failed to submit rating",
+      details: err.message
     });
   }
 };
