@@ -27,9 +27,11 @@ exports.sendPartnerEmailOtp = async (req, res) => {
   const otp = Math.floor(100000 + Math.random() * 900000).toString();
 
   otpStore[email] = {
-    otp,
-    expiresAt: Date.now() + 5 * 60 * 1000, // 5 minutes
-  };
+  otp,
+  purpose,   // ⭐ VERY IMPORTANT
+  expiresAt: Date.now() + 5 * 60 * 1000,
+};
+
 
   try {
     // Check if partner already exists
@@ -56,7 +58,9 @@ exports.sendPartnerEmailOtp = async (req, res) => {
 //                   VERIFY OTP
 // ────────────────────────────────────────────────
 exports.verifyPartnerEmailOtp = async (req, res) => {
-  const { email, otp, purpose } = req.body; // purpose should match send
+  console.log("VERIFY OTP BODY:", req.body);   // ← keep this
+
+  const { email, otp, purpose } = req.body;
 
   if (!email || !otp || !purpose) {
     return res.status(400).json({ message: "Email, OTP and purpose required" });
@@ -78,53 +82,87 @@ exports.verifyPartnerEmailOtp = async (req, res) => {
 
   try {
     let partner;
+    let isNew = false;
 
     if (purpose === "signup") {
-      // Create new partner
+      // Check again just before create (race condition protection)
+      const exists = await DeliveryPartner.findOne({ email });
+      if (exists) {
+        delete otpStore[email];
+        return res.status(409).json({ message: "Email already registered" });
+      }
+
       partner = await DeliveryPartner.create({
-        email,
+        email: email.trim().toLowerCase(),
         isVerified: true,
-        isActive: true,           // or false — depending on your flow
-        approvalStatus: "PENDING", // or "APPROVED" if instant
+        isActive: false,           // ← usually false until onboarding + approval
+        approvalStatus: "PENDING",
         lastLogin: new Date(),
-        // other defaults...
+        createdByOtp: true,
+        // Do NOT set fullName, phone, etc. here — let onboarding do it
       });
+
+      isNew = true;
     } else {
-      // Login – must already exist
-      partner = await DeliveryPartner.findOne({ email });
+      // Login
+      partner = await DeliveryPartner.findOne({ email: email.trim().toLowerCase() });
       if (!partner) {
         delete otpStore[email];
-        return res.status(400).json({ message: "Partner not found" });
+        return res.status(404).json({ message: "No account found with this email" });
       }
+
       partner.lastLogin = new Date();
       await partner.save();
     }
 
+    // Generate token
     const token = jwt.sign(
-  { _id: partner._id, email: partner.email, role: "partner" },
-  process.env.JWT_SECRET,
-  { expiresIn: "7d" }
-);
-
+      {
+        _id: partner._id,
+        email: partner.email,
+        role: "partner",
+      },
+      process.env.JWT_SECRET,
+      { expiresIn: "7d" }
+    );
 
     delete otpStore[email];
 
-    res.status(200).json({
+    return res.status(200).json({
       success: true,
-      message: purpose === "signup" ? "Account created successfully" : "Logged in successfully",
+      message: isNew ? "Account created successfully" : "Logged in successfully",
       token,
       partner: {
-        id: partner._id,
+        id: partner._id.toString(),
         email: partner.email,
         fullName: partner.fullName || null,
         isVerified: partner.isVerified,
         approvalStatus: partner.approvalStatus,
-        // add more fields as needed
+        isActive: partner.isActive,
       },
     });
-
   } catch (err) {
-    console.error("Verify OTP error:", err);
-    res.status(500).json({ message: "Server error" });
+    console.error("VERIFY OTP CRASH ───────────────────────────────");
+    console.error("Error name:   ", err.name);
+    console.error("Error message:", err.message);
+    console.error("Full stack:   ", err.stack);
+
+    // Mongoose validation / duplicate key / etc.
+    if (err.name === "ValidationError") {
+      return res.status(400).json({
+        message: "Validation failed",
+        details: Object.values(err.errors).map(e => e.message),
+      });
+    }
+
+    if (err.code === 11000) { // Mongo duplicate key
+      return res.status(409).json({ message: "Email already in use" });
+    }
+
+    return res.status(500).json({
+      message: "Server error during verification",
+      // only show in dev
+      ...(process.env.NODE_ENV === "development" && { debug: err.message }),
+    });
   }
 };
