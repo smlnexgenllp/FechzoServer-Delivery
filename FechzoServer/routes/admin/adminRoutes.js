@@ -9,8 +9,12 @@ const {
 } = require('../../controllers/admin/restaurantControllers');
 const {
   saveDeliveryPartnerPaymentSettings,
-  getDeliveryPartnerPaymentSettings
+  getDeliveryPartnerPaymentSettings,
+  getAllPayoutRequests,
+  approvePayout,
+  rejectPayout
 } = require('../../controllers/admin/AdminPaymentControllers');
+const verifyAdmin = require("../../middleware/auth/verifyAdmin")
 const ratingController = require('../../controllers/admin/restaurantreviewControllers');
 // Import middleware (this line was missing for adminAuth)
 const adminAuth = require("../../middleware/auth/adminAuth");
@@ -89,4 +93,8 @@ router.get('/paymenthistory', paymentManagemnt.getPaymentHistory);
 router.post('/confirmPayment', paymentManagemnt.confirmPayment);
 router.post('/delivery-partner/payment-settings',saveDeliveryPartnerPaymentSettings);
 router.get('/delivery-partner/payment-settings',getDeliveryPartnerPaymentSettings);
+
+router.get('/payout-requests', verifyAdmin, getAllPayoutRequests);
+router.post('/payout/:requestId/approve', verifyAdmin, approvePayout);
+router.post('/payout/:requestId/reject', verifyAdmin, rejectPayout);
 module.exports = router;

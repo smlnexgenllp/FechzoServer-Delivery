@@ -15,7 +15,9 @@ const {
   updateMyProfile,
   uploadDocument,
   getPartnerDocuments,
+
 } = require("../../controllers/deliverypartner/deliveryPartner.controller");
+const { requestPayout, getMyPayoutRequests , linkBankAccount} = require("../../controllers/deliverypartner/payoutController");
 // ─────────────────────────────────────────────
 // Public / Partner routes
 // ─────────────────────────────────────────────
@@ -28,6 +30,9 @@ router.patch("/profile", verifyPartner, updateMyProfile);
 
 router.post("/documents/upload", verifyPartner, uploadDocument);
 router.get('/documents', verifyPartner, getPartnerDocuments);
+router.post('/payout/requests', verifyPartner, requestPayout);
+router.get('/payout/requests', verifyPartner, getMyPayoutRequests);
+router.post('/bank/link', verifyPartner, linkBankAccount);
 // Get own profile (partner authenticated)
 
 

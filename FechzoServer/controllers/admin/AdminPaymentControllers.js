@@ -2,6 +2,9 @@ const mongoose = require('mongoose');
 const Payment = require('../../models/order/payment');
 const Order = require('../../models/order/order');
 const User = require('../../models/User/User');
+const PartnerPayoutRequest = require('../../models/deliverypartner/PartnerPayoutRequest');
+const DeliveryPartner = require('../../models/deliverypartner/DeliveryPartner');
+// const razorpay = require('../../config/razorpay'); // your Razorpay instance
 
 // Helper function to format payment method for frontend
 const formatPaymentMethod = (method) => {
@@ -467,5 +470,123 @@ exports.getDeliveryPartnerPaymentSettings = async (req, res) => {
       message: "Failed to fetch settings",
       error: error.message
     });
+  }
+};
+
+
+// Admin: Get all pending payout requests
+exports.getAllPayoutRequests = async (req, res) => {
+  try {
+    const { status = 'pending', page = 1, limit = 20 } = req.query;
+
+    const query = status !== 'all' ? { status } : {};
+
+    const requests = await PartnerPayoutRequest.find(query)
+      .populate('partnerId', 'fullName phone email')
+      .sort({ requestedAt: -1 })
+      .skip((page - 1) * limit)
+      .limit(parseInt(limit));
+
+    const total = await PartnerPayoutRequest.countDocuments(query);
+
+    res.json({
+      success: true,
+      requests,
+      pagination: {
+        total,
+        page: parseInt(page),
+        pages: Math.ceil(total / limit),
+      },
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+// Admin: Approve & Process Payout
+exports.approvePayout = async (req, res) => {
+  try {
+    const { requestId } = req.params;
+    const { notes } = req.body;
+
+    const request = await PartnerPayoutRequest.findById(requestId);
+    if (!request) return res.status(404).json({ success: false, message: 'Request not found' });
+
+    if (request.status !== 'pending') {
+      return res.status(400).json({ success: false, message: 'Request already processed' });
+    }
+
+    const partner = await DeliveryPartner.findById(request.partnerId);
+    if (!partner?.bankDetails?.fundAccountId) {
+      return res.status(400).json({ success: false, message: 'Partner bank account not linked' });
+    }
+
+    request.status = 'processing';
+    request.adminNotes = notes || 'Approved by admin';
+    await request.save();
+
+    // Real Razorpay payout (uncomment in production)
+    /*
+    const payout = await razorpay.payouts.create({
+      account_number: process.env.RAZORPAY_ACCOUNT_NUMBER,
+      fund_account_id: partner.bankDetails.fundAccountId,
+      amount: request.amount * 100, // paise
+      currency: "INR",
+      mode: "IMPS",
+      purpose: "payout",
+      queue_if_low_balance: true,
+      reference_id: request._id.toString(),
+      narration: `Payout to ${partner.fullName}`,
+    });
+
+    request.razorpayPayoutId = payout.id;
+    */
+
+    // Simulate success
+    request.status = 'completed';
+    request.processedAt = new Date();
+    await request.save();
+
+    res.json({
+      success: true,
+      message: 'Payout approved and processed',
+      request,
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+// Admin: Reject Payout
+exports.rejectPayout = async (req, res) => {
+  try {
+    const { requestId } = req.params;
+    const { reason } = req.body;
+
+    if (!reason) return res.status(400).json({ success: false, message: 'Rejection reason required' });
+
+    const request = await PartnerPayoutRequest.findById(requestId);
+    if (!request) return res.status(404).json({ success: false, message: 'Request not found' });
+
+    if (request.status !== 'pending') {
+      return res.status(400).json({ success: false, message: 'Request already processed' });
+    }
+
+    request.status = 'rejected';
+    request.adminNotes = reason;
+    await request.save();
+
+    // Refund amount back to pending balance
+    await DeliveryPartner.findByIdAndUpdate(request.partnerId, {
+      $inc: { pendingBalance: request.amount },
+    });
+
+    res.json({
+      success: true,
+      message: 'Payout request rejected',
+      request,
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
   }
 };
