@@ -25,6 +25,7 @@ router.post("/check", checkDeliveryPartner);
 router.get("/profile",verifyPartner, getMyProfile);
 // PATCH /api/delivery-partner/profile
 router.patch("/profile", verifyPartner, updateMyProfile);
+
 router.post("/documents/upload", verifyPartner, uploadDocument);
 router.get('/documents', verifyPartner, getPartnerDocuments);
 // Get own profile (partner authenticated)
