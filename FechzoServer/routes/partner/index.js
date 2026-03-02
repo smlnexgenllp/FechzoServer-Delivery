@@ -12,16 +12,30 @@ const { submitOnboarding } = require("../../controllers/deliverypartner/onboardi
 router.post(
   "/onboarding",
   partnerAuth,
-  upload.fields([                           // ← THIS WAS MISSING
-    { name: "profilePhoto", maxCount: 1 },
-    { name: "panCard", maxCount: 1 },
-    { name: "aadharFront", maxCount: 1 },
+  (req, res, next) => {
+    console.log("→→→ [DEBUG] Headers:", req.headers["content-type"]);
+    console.log("→→→ [DEBUG] Body keys (text):", Object.keys(req.body));
+    next();
+  },
+  upload.fields([
+    { name: "profilePhoto",     maxCount: 1 },
+    { name: "panCard",          maxCount: 1 },
+    { name: "aadharFront",      maxCount: 1 },
     { name: "drivingLicenseFront", maxCount: 1 },
-    { name: "rcBookFront", maxCount: 1 },
+    { name: "rcBookFront",      maxCount: 1 },
   ]),
+  (req, res, next) => {
+    console.log("→→→ [DEBUG] After multer - req.body keys:", Object.keys(req.body));
+    console.log("→→→ [DEBUG] req.files keys:", req.files ? Object.keys(req.files) : "NO FILES RECEIVED");
+    if (req.files) {
+      Object.keys(req.files).forEach(key => {
+        console.log(`   → File: ${key} | originalname: ${req.files[key][0]?.originalname} | size: ${req.files[key][0]?.size}`);
+      });
+    }
+    next();
+  },
   submitOnboarding
 );
-
 // GET /api/partner/dashboard (no change needed here)
 router.get("/dashboard", partnerAuth, async (req, res) => {
   try {
