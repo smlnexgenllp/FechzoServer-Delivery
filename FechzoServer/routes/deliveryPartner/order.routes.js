@@ -3,7 +3,7 @@ const router = express.Router();
 const verifyPartner = require("../../middleware/auth/verifyPartner");
 const authMiddleware = require("../../middleware/auth/authMiddleware");
 const { Payout } = require("../../models/deliverypartner/Payout");
-const {getPayoutHistory} = require("../../controllers/deliverypartner/payoutController");
+const { getPayoutHistory } = require("../../controllers/deliverypartner/payoutController");
 const {
   getAvailableOrders,
   acceptOrder,
@@ -15,10 +15,10 @@ const {
   reportDelayByPartner,
   getTodayEarnings,
   getTotalEarnings,
-getCurrentMonthEarnings,
-getRecentEarnings,
-getRestaurantOrders,
-rateDeliveryPartner
+  getCurrentMonthEarnings,
+  getRecentEarnings,
+  getRestaurantOrders,
+  rateDeliveryPartner
 } = require("../../controllers/food/orders/orderController");
 const DeliveryPartner = require("../../models/deliverypartner/DeliveryPartner");
 
@@ -69,7 +69,7 @@ router.get('/earnings/today', verifyPartner, getTodayEarnings);
 router.get('/earnings/total', verifyPartner, getTotalEarnings);
 router.get('/earnings/month', verifyPartner, getCurrentMonthEarnings);
 router.get('/earnings/recent', verifyPartner, getRecentEarnings);
-router.get('/restaurant/orders',  getRestaurantOrders);
+router.get('/restaurant/orders', getRestaurantOrders);
 router.get('/payouts', verifyPartner, getPayoutHistory);
 // routes/orderRoutes.js
 // Optional: status-specific route
