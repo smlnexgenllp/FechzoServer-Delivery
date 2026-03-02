@@ -36,12 +36,12 @@ router.get('/documents', verifyPartner, getPartnerDocuments);
 // ─────────────────────────────────────────────
 
 // Get all pending partners
-router.get("/admin/pending", adminAuth, getPendingPartners);
+router.get("/admin/pending", getPendingPartners);
 
 // Get all approved partners
-router.get("/admin/approved", adminAuth, getApprovedPartners);
+router.get("/admin/approved", getApprovedPartners);
 
 // Approve a pending partner
-router.put("/admin/approve/:partnerId", adminAuth, approvePartner);
+router.put("/admin/approve/:partnerId", approvePartner);
 
 module.exports = router;
