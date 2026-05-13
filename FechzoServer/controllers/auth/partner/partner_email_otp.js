@@ -1,3 +1,5 @@
+// controllers/partnerAuthController.js
+
 const jwt = require("jsonwebtoken");
 const nodemailer = require("nodemailer");
 const DeliveryPartner = require("../../../models/deliverypartner/DeliveryPartner");
@@ -10,10 +12,14 @@ const transporter = nodemailer.createTransport({
   },
 });
 
-const otpStore = {}; // use redis in production!
+const otpStore = {}; // ← Use Redis in production!
 
+// ────────────────────────────────────────────────
+//              SEND OTP – for both login & signup
+// ────────────────────────────────────────────────
 exports.sendPartnerEmailOtp = async (req, res) => {
-  const { email } = req.body;
+  const { email, purpose } = req.body; // purpose: "login" or "signup"
+  
   if (!email) {
     return res.status(400).json({ message: "Email is required" });
   }
@@ -21,9 +27,11 @@ exports.sendPartnerEmailOtp = async (req, res) => {
   const otp = Math.floor(100000 + Math.random() * 900000).toString();
 
   otpStore[email] = {
-    otp,
-    expiresAt: Date.now() + 5 * 60 * 1000, // 5 minutes
-  };
+  otp,
+  purpose,   // ⭐ VERY IMPORTANT
+  expiresAt: Date.now() + 5 * 60 * 1000,
+};
+
 
   try {
     // Check if partner already exists
@@ -32,7 +40,7 @@ exports.sendPartnerEmailOtp = async (req, res) => {
     await transporter.sendMail({
       from: process.env.EMAIL_USER,
       to: email,
-      subject: "Fechzo Delivery Partner - OTP",
+      subject: `Fechzo Delivery Partner - ${purpose === "signup" ? "Signup" : "Login"} OTP`,
       text: `Your OTP is ${otp}. Valid for 5 minutes.`,
     });
 
@@ -41,21 +49,26 @@ exports.sendPartnerEmailOtp = async (req, res) => {
       alreadyRegistered: !!existingPartner,   // true if exists, false if new
     });
   } catch (err) {
-    console.error("Email send error:", err);
+    console.error("OTP send error:", err);
     res.status(500).json({ message: "Failed to send OTP" });
   }
 };
 
+// ────────────────────────────────────────────────
+//                   VERIFY OTP
+// ────────────────────────────────────────────────
 exports.verifyPartnerEmailOtp = async (req, res) => {
-  const { email, otp } = req.body;
+  console.log("VERIFY OTP BODY:", req.body);   // ← keep this
 
-  if (!email || !otp) {
-    return res.status(400).json({ message: "Email and OTP are required" });
+  const { email, otp, purpose } = req.body;
+
+  if (!email || !otp || !purpose) {
+    return res.status(400).json({ message: "Email, OTP and purpose required" });
   }
 
   const stored = otpStore[email];
-  if (!stored) {
-    return res.status(400).json({ message: "OTP not found or expired" });
+  if (!stored || stored.purpose !== purpose) {
+    return res.status(400).json({ message: "Invalid or expired OTP session" });
   }
 
   if (Date.now() > stored.expiresAt) {
@@ -68,41 +81,88 @@ exports.verifyPartnerEmailOtp = async (req, res) => {
   }
 
   try {
-    let partner = await DeliveryPartner.findOne({ email });
+    let partner;
+    let isNew = false;
 
-    if (!partner) {
+    if (purpose === "signup") {
+      // Check again just before create (race condition protection)
+      const exists = await DeliveryPartner.findOne({ email });
+      if (exists) {
+        delete otpStore[email];
+        return res.status(409).json({ message: "Email already registered" });
+      }
+
       partner = await DeliveryPartner.create({
-        email,
+        email: email.trim().toLowerCase(),
         isVerified: true,
+        isActive: false,           // ← usually false until onboarding + approval
+        approvalStatus: "PENDING",
         lastLogin: new Date(),
+        createdByOtp: true,
+        // Do NOT set fullName, phone, etc. here — let onboarding do it
       });
+
+      isNew = true;
     } else {
+      // Login
+      partner = await DeliveryPartner.findOne({ email: email.trim().toLowerCase() });
+      if (!partner) {
+        delete otpStore[email];
+        return res.status(404).json({ message: "No account found with this email" });
+      }
+
       partner.lastLogin = new Date();
       await partner.save();
     }
 
+    // Generate token
     const token = jwt.sign(
-  { _id: partner._id, email: partner.email, role: "partner" },
-  process.env.JWT_SECRET,
-  { expiresIn: "7d" }
-);
-
+      {
+        _id: partner._id,
+        email: partner.email,
+        role: "partner",
+      },
+      process.env.JWT_SECRET,
+      { expiresIn: "7d" }
+    );
 
     delete otpStore[email];
 
-    res.status(200).json({
+    return res.status(200).json({
       success: true,
-      message: "Verified successfully",
+      message: isNew ? "Account created successfully" : "Logged in successfully",
       token,
       partner: {
-        id: partner._id,
+        id: partner._id.toString(),
         email: partner.email,
+        fullName: partner.fullName || null,
         isVerified: partner.isVerified,
-        // add more fields later if needed
+        approvalStatus: partner.approvalStatus,
+        isActive: partner.isActive,
       },
     });
   } catch (err) {
-    console.error("Verify OTP error:", err);
-    res.status(500).json({ message: "Server error" });
+    console.error("VERIFY OTP CRASH ───────────────────────────────");
+    console.error("Error name:   ", err.name);
+    console.error("Error message:", err.message);
+    console.error("Full stack:   ", err.stack);
+
+    // Mongoose validation / duplicate key / etc.
+    if (err.name === "ValidationError") {
+      return res.status(400).json({
+        message: "Validation failed",
+        details: Object.values(err.errors).map(e => e.message),
+      });
+    }
+
+    if (err.code === 11000) { // Mongo duplicate key
+      return res.status(409).json({ message: "Email already in use" });
+    }
+
+    return res.status(500).json({
+      message: "Server error during verification",
+      // only show in dev
+      ...(process.env.NODE_ENV === "development" && { debug: err.message }),
+    });
   }
 };

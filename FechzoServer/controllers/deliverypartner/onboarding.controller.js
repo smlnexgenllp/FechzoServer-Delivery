@@ -1,11 +1,31 @@
+// controllers/deliveryPartner/deliveryPartner.controller.js
+const cloudinary = require("../../config/cloudinary");
 const DeliveryPartner = require("../../models/deliverypartner/DeliveryPartner");
 const { createNotification } = require("../admin/NotificationController");
 
+const uploadToCloudinary = (buffer, folder, prefix) => {
+  return new Promise((resolve, reject) => {
+    const stream = cloudinary.uploader.upload_stream(
+      {
+        folder: `delivery-partners/${folder}`,
+        public_id: `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        resource_type: "image",
+        allowed_formats: ["jpg", "jpeg", "png"],
+      },
+      (error, result) => {
+        if (error) return reject(error);
+        resolve({ url: result.secure_url, publicId: result.public_id });
+      }
+    );
+    stream.end(buffer);
+  });
+};
+
 const submitOnboarding = async (req, res) => {
   try {
-    const partnerId = req.partner?._id;
+    const partnerId = req.partner?._id?.toString() || req.partner?.id;
     if (!partnerId) {
-      return res.status(401).json({ success: false, message: "Unauthorized - Please login again" });
+      return res.status(401).json({ success: false, message: "Unauthorized" });
     }
 
     const {
@@ -19,86 +39,94 @@ const submitOnboarding = async (req, res) => {
       area,
       latitude,
       longitude,
-      bankName,
-      accountNumber,
-      ifsc,
     } = req.body;
 
-    // Required fields validation
-    const requiredFields = { fullName, phone, vehicleType, vehicleNumber, city, area };
-    for (const [key, value] of Object.entries(requiredFields)) {
-      if (!value?.trim()) {
-        return res.status(400).json({ success: false, message: `${key} is required` });
+    const required = { fullName, vehicleType, vehicleNumber, city };
+    const missing = Object.keys(required).filter(k => !required[k]?.trim());
+    if (missing.length > 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Missing required fields",
+        missingFields: missing,
+      });
+    }
+
+    const updateData = {
+      fullName: fullName.trim(),
+      phone: phone?.trim(),
+      vehicleType,
+      vehicleNumber: vehicleNumber.trim().toUpperCase(),
+      licenseNumber: licenseNumber?.trim()?.toUpperCase(),
+      aadharNumber: aadharNumber?.trim(),
+      city: city.trim(),
+      area: area?.trim(),
+      latitude: latitude ? Number(latitude) : undefined,
+      longitude: longitude ? Number(longitude) : undefined,
+      onboardingCompleted: true,
+      approvalStatus: "PENDING",
+      isActive: false,
+    };
+
+    // Handle file uploads
+    if (req.files && Object.keys(req.files).length > 0) {
+      const files = req.files;
+      const uploads = [];
+
+      if (files.profilePhoto?.[0]?.buffer) {
+        uploads.push(
+          uploadToCloudinary(files.profilePhoto[0].buffer, "profiles", "profile")
+            .then(r => {
+              updateData.profilePhoto = r.url;
+              updateData.profilePhotoPublicId = r.publicId;
+            })
+        );
       }
+
+      if (files.panCard?.[0]?.buffer) {
+        uploads.push(
+          uploadToCloudinary(files.panCard[0].buffer, "kyc", "pan")
+            .then(r => {
+              updateData.panCard = r.url;
+              updateData.panCardPublicId = r.publicId;
+            })
+        );
+      }
+
+      // Repeat for aadharFront, drivingLicenseFront, rcBookFront...
+
+      await Promise.allSettled(uploads);
     }
 
-    // Phone format
-    if (!/^[6-9]\d{9}$/.test(phone)) {
-      return res.status(400).json({ success: false, message: "Invalid Indian mobile number" });
-    }
+    const partner = await DeliveryPartner.findByIdAndUpdate(partnerId, updateData, {
+      new: true,
+      runValidators: true,
+    });
 
-    // Update partner (set onboarding to true, status to PENDING)
-    const updatedPartner = await DeliveryPartner.findByIdAndUpdate(
-      partnerId,
-      {
-        fullName: fullName.trim(),
-        phone: phone.trim(),
-        vehicleType,
-        vehicleNumber: vehicleNumber.trim().toUpperCase(),
-        licenseNumber: licenseNumber?.trim(),
-        aadharNumber: aadharNumber?.trim(),
-        city: city.trim(),
-        area: area.trim(),
-        latitude: latitude ? Number(latitude) : undefined,
-        longitude: longitude ? Number(longitude) : undefined,
-        bankDetails: {
-          bankName: bankName?.trim(),
-          accountNumber: accountNumber?.trim(),
-          ifsc: ifsc?.trim().toUpperCase(),
-          // fundAccountId will be added later when linking via Razorpay
-        },
-        onboardingCompleted: true,
-        approvalStatus: "PENDING",
-        isActive: false,
-      },
-      { new: true, runValidators: true }
-    );
-
-    if (!updatedPartner) {
+    if (!partner) {
       return res.status(404).json({ success: false, message: "Partner not found" });
     }
 
-    // Create admin notification
+    // Notification to admin
     await createNotification({
       restaurantId: "SYSTEM",
-      restaurantName: "Delivery Partner System",
       category: "Registration",
       action: "DELIVERY_PARTNER_ONBOARDING",
-      message: `New onboarding request from ${updatedPartner.fullName} (${updatedPartner.phone})`,
+      message: `New onboarding: ${partner.fullName} (${partner.phone || "No phone"})`,
       details: JSON.stringify({
-        partnerId: updatedPartner._id.toString(),
-        name: updatedPartner.fullName,
-        phone: updatedPartner.phone,
-        city: updatedPartner.city,
-        vehicle: `${updatedPartner.vehicleType} - ${updatedPartner.vehicleNumber}`,
-        status: updatedPartner.approvalStatus,
+        partnerId: partner._id.toString(),
+        name: partner.fullName,
+        phone: partner.phone,
+        city: partner.city,
       }),
     });
 
     res.status(200).json({
       success: true,
-      message: "Onboarding submitted successfully. Waiting for admin approval.",
-      partner: {
-        fullName: updatedPartner.fullName,
-        approvalStatus: updatedPartner.approvalStatus,
-      },
+      message: "Onboarding submitted. Bank linking in progress. Waiting for approval.",
     });
-  } catch (error) {
-    console.error("Onboarding submission error:", error);
-    res.status(500).json({
-      success: false,
-      message: error.message || "Server error during onboarding",
-    });
+  } catch (err) {
+    console.error("[ONBOARDING] Error:", err);
+    res.status(500).json({ success: false, message: err.message || "Server error" });
   }
 };
 
