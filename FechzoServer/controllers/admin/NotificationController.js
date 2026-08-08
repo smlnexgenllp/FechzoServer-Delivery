@@ -6,7 +6,7 @@ const createNotification = async (notificationData) => {
   try {
     const notification = new AdminNotification({
       restaurantId: notificationData.restaurantId,
-      restaurantName: notificationData.restaurantName,
+      restaurantName: notificationData.restaurantName || 'system',
       category: notificationData.category,
       action: notificationData.action,
       message: notificationData.message,

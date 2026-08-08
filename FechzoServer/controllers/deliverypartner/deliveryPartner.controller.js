@@ -22,7 +22,7 @@ const getPendingPartners = async (req, res) => {
   try {
     const partners = await DeliveryPartner.find({
       approvalStatus: "PENDING",
-      onboardingCompleted: true, // only show those who completed onboarding
+      onboardingCompleted: true, 
     })
       .select(
         "fullName phone email vehicleType vehicleNumber licenseNumber aadharNumber " +
@@ -329,6 +329,42 @@ const getPartnerDocuments = async (req, res) => {
     res.status(500).json({ success: false, message: 'Server error' });
   }
 };
+const updateAvailability = async (req, res) => {
+  try {
+    const { isOnline } = req.body;
+
+    const partner = await DeliveryPartner.findByIdAndUpdate(
+      req.partner._id,
+      {
+        isOnline: isOnline,
+        lastActive: new Date(),
+      },
+      { new: true }
+    );
+
+    if (!partner) {
+      return res.status(404).json({
+        success: false,
+        message: "Partner not found",
+      });
+    }
+
+    res.json({
+      success: true,
+      message: `Partner is now ${isOnline ? "ONLINE" : "OFFLINE"}`,
+      status: {
+        onlineStatus: partner.isOnline,
+        lastActive: partner.lastActive,
+      },
+    });
+  } catch (error) {
+    console.error("updateAvailability error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Server error",
+    });
+  }
+};
 module.exports = {
   checkDeliveryPartner,
   getPendingPartners,
@@ -338,5 +374,6 @@ module.exports = {
    getMyProfile,
    uploadDocument,
    getPartnerDocuments,
+   updateAvailability
 };
   

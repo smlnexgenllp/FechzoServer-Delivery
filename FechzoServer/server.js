@@ -193,11 +193,13 @@ const deliveryPartnerRoutes = require("./routes/delivery/deliveryPartner.routes.
 const deliveryPartnerOrderRoutes = require(
   "./routes/deliveryPartner/order.routes"
 );
+const notificationRoute = require("./routes/deliveryPartner/notificationRoute.js");
 const partnerRoutes = require("./routes/partner/index.js");
 const { acceptInvite } = require("./controllers/restaurants/outlet/ContactController.js");
 const razorpayRoutes = require('./routes/razorpay/RazorPayRoutes.js')
 const notificationRoutes = require('./routes/restaurants/notificationRoutes');
 const mapsRoutes = require('./routes/maps');
+const walletRoutes=require("./routes/deliverypartner/walletRoutes");
 // const offerRoutes = require('./routes/offers/offerRoutes');
 // const branchRoutes = require('./routes/branches/branchRoutes');
 // const performanceRoutes = require('./routes/performance/performanceRoutes');
@@ -215,6 +217,7 @@ connectDB()
     app.use('/api/restaurants', restaurantRoutes);
     app.use('/api/delivery', deliveryRoutes);
     app.use('/api/admin', adminRoutes);
+    app.use("/api/notifications", notificationRoute);
     app.use('/api/food', foodRoutes);
     app.use('/api/auth', authRoutes);
     app.use('/api/outlet', outletRoutes);
@@ -236,7 +239,7 @@ connectDB()
     // app.use('/api/shops', shopRoutes);
 
     app.use("/api/partner", require("./routes/partner/index.js"));
-    
+    app.use("/api/delivery-partner",walletRoutes);
     app.use("/api/delivery-partner/orders", deliveryPartnerOrderRoutes);
     // Root route - serves the landing page
     app.get('/', (req, res) => {
