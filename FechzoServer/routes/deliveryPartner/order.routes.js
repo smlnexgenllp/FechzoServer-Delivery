@@ -18,7 +18,9 @@ const {
 getCurrentMonthEarnings,
 getRecentEarnings,
 getRestaurantOrders,
-rateDeliveryPartner
+rateDeliveryPartner,
+getOrderDetail,
+getPartnerDashboardStats,
 } = require("../../controllers/food/orders/orderController");
 const DeliveryPartner = require("../../models/deliverypartner/DeliveryPartner");
 
@@ -69,9 +71,16 @@ router.get('/earnings/today', verifyPartner, getTodayEarnings);
 router.get('/earnings/total', verifyPartner, getTotalEarnings);
 router.get('/earnings/month', verifyPartner, getCurrentMonthEarnings);
 router.get('/earnings/recent', verifyPartner, getRecentEarnings);
+router.get(
+"/dashboard-stats",
+verifyPartner,
+getPartnerDashboardStats
+);
 router.get('/restaurant/orders',  getRestaurantOrders);
 router.get('/payouts', verifyPartner, getPayoutHistory);
+router.get('/:orderId', verifyPartner, getOrderDetail);
 // routes/orderRoutes.js
 // Optional: status-specific route
 router.get('/restaurant/orders/:status', getRestaurantOrders);
+
 module.exports = router;

@@ -3,6 +3,7 @@ const mongoose = require('mongoose');
 const Payment = require('../../../models/order/payment');
 const notificationController = require('../../restaurants/notificationController');
 const Restaurant = require('../../../models/restaurants/Restaurants');
+const {createNotifications} = require('../../../controllers/deliverypartner/notificationController')
 const Settings = require('../../../models/Admin/Settings');
 // Get all orders for a specific user
 exports.getUserOrders = async (req, res) => {
@@ -784,9 +785,37 @@ exports.acceptOrder = async (req, res) => {
     // order.orderStatus remains "ready"
 
     await order.save();
-
-    // Optional: notify restaurant
     const io = req.app.get("io");
+
+// Notify Restaurant
+await createNotifications({
+  io,
+  userId: order.restaurantId,
+  userType: "restaurant",
+  userModel: "Restaurant",
+  title: "Order Accepted",
+  message: `Delivery partner accepted Order #${order.orderId}`,
+  type: "partner_accepted",
+  orderId: order._id,
+});
+
+// Notify Customer
+await createNotifications({
+  io,
+  userId: order.userId,
+  userType: "customer",
+  userModel: "User",
+  title: "Delivery Partner Assigned",
+  message: "A delivery partner has been assigned to your order.",
+  type: "partner_assigned",
+  orderId: order._id,
+});
+   
+    io.emit("newOrderAvailable", {
+    orderId: order._id,
+    restaurant: order.restaurantName,
+    total: order.total
+});
     if (io) {
       io.to(order.restaurantId.toString()).emit("partnerAccepted", {
         orderId: order._id,
@@ -832,6 +861,29 @@ exports.updatePartnerOrderStatus = async (req, res) => {
     if (status === 'picked_up') {
       order.orderStatus = 'out_for_delivery';
       order.delivery.pickedUpAt = new Date();
+      const io = req.app.get("io");
+
+await createNotifications({
+  io,
+  userId: order.userId,
+  userType: "customer",
+  userModel: "User",
+  title: "Order Picked Up",
+  message: "Your food has been picked up and is on the way.",
+  type: "picked_up",
+  orderId: order._id,
+});
+
+await createNotifications({
+  io,
+  userId: order.restaurantId,
+  userType: "restaurant",
+  userModel: "Restaurant",
+  title: "Order Picked Up",
+  message: `Order #${order.orderId} has been picked up.`,
+  type: "picked_up",
+  orderId: order._id,
+});
     } else if (status === 'delivered') {
       order.orderStatus = 'delivered';
       order.delivery.deliveredAt = new Date();
@@ -858,9 +910,45 @@ exports.updatePartnerOrderStatus = async (req, res) => {
     }
 
     await order.save();
+const io = req.app.get("io");
 
+// Customer
+await createNotifications({
+  io,
+  userId: order.userId,
+  userType: "customer",
+  userModel: "User",
+  title: "Order Delivered",
+  message: "Enjoy your meal. Thank you for ordering.",
+  type: "delivered",
+  orderId: order._id,
+});
+
+// Restaurant
+await createNotifications({
+  io,
+  userId: order.restaurantId,
+  userType: "restaurant",
+  userModel: "Restaurant",
+  title: "Order Delivered",
+  message: `Order #${order.orderId} has been delivered.`,
+  type: "delivered",
+  orderId: order._id,
+});
+
+// Partner
+await createNotifications({
+  io,
+  userId: partnerId,
+  userType: "partner",
+  userModel: "DeliveryPartner",
+  title: "Delivery Completed",
+  message: `Order #${order.orderId} delivered successfully.`,
+  type: "delivered",
+  orderId: order._id,
+});
     // Emit socket update (keep your existing io code)
-    const io = req.app.get('io');
+    
     if (io) {
       io.to(`order:${order._id}`).emit('partnerStatusUpdated', {
         orderId: order._id,
@@ -971,12 +1059,19 @@ exports.cancelOrderByPartner = async (req, res) => {
       });
     }
 
-    const order = await Order.findOne({
-      _id: orderId,
-      "delivery.partnerId": partnerId,
-      orderStatus: { $in: ["ready", "accepted"] }, // only allow cancel before pickup
-    });
+    const order = await Order.findById(orderId);
 
+console.log(order);
+console.log("partner from token:", partnerId.toString());
+
+console.log("order status:", order?.orderStatus);
+
+console.log("delivery status:", order?.deliveryPartnerStatus);
+
+console.log(
+    "partner in order:",
+    order?.delivery?.partnerId?.toString()
+);
     if (!order) {
       return res.status(403).json({ 
         error: "Order not found, not assigned to you, or cannot be cancelled now" 
@@ -995,9 +1090,32 @@ exports.cancelOrderByPartner = async (req, res) => {
     order.delivery.assignedAt = null;
 
     await order.save();
+const io = req.app.get("io");
 
-    // Optional: Notify restaurant
-    const io = req.app.get("io");
+// Restaurant
+await createNotifications({
+  io,
+  userId: order.restaurantId,
+  userType: "restaurant",
+  userModel: "Restaurant",
+  title: "Order Cancelled",
+  message: `Delivery partner cancelled Order #${order.orderId}`,
+  type: "partner_cancelled",
+  orderId: order._id,
+});
+
+// Customer
+await createNotifications({
+  io,
+  userId: order.userId,
+  userType: "customer",
+  userModel: "User",
+  title: "Delivery Delayed",
+  message: "Your delivery partner cancelled the order. We are assigning another partner.",
+  type: "partner_cancelled",
+  orderId: order._id,
+});
+  
     if (io && order.restaurantId) {
       io.to(order.restaurantId.toString()).emit("orderCancelledByPartner", {
         orderId: order._id,
@@ -1388,6 +1506,98 @@ exports.rateDeliveryPartner = async (req, res) => {
     res.status(500).json({
       error: "Failed to submit rating",
       details: err.message
+    });
+  }
+};
+// controllers/deliveryPartner/orderController.js (add this function)
+exports.getOrderDetail = async (req, res) => {
+  try {
+    const { orderId } = req.params; // Mongo _id
+    const partnerId = req.partner._id;
+
+    const order = await Order.findOne({
+      _id: orderId,
+      "delivery.partnerId": partnerId
+    })
+      .populate('restaurantId', 'restaurantName restaurantImage address phone')
+      .lean();
+
+    if (!order) {
+      return res.status(404).json({ error: 'Order not found or not yours' });
+    }
+
+    res.status(200).json(order);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Server error' });
+  }
+};
+exports.getPartnerDashboardStats = async (req, res) => {
+  try {
+    const partnerId = req.partner._id;
+
+    const totalAssigned = await Order.countDocuments({
+      "delivery.partnerId": partnerId
+    });
+
+    const accepted = await Order.countDocuments({
+      "delivery.partnerId": partnerId,
+      deliveryPartnerStatus: {
+        $in: [
+          "accepted",
+          "reached_restaurant",
+          "picked_up",
+          "reached_customer",
+          "delivered"
+        ]
+      }
+    });
+
+    const cancelled = await Order.countDocuments({
+      "delivery.partnerId": partnerId,
+      deliveryPartnerStatus: "cancelled_by_partner"
+    });
+
+    const delivered = await Order.countDocuments({
+      "delivery.partnerId": partnerId,
+      orderStatus: "delivered"
+    });
+
+    const ratedOrders = await Order.find({
+      "delivery.partnerId": partnerId,
+      partnerRating: { $exists: true, $ne: null }
+    }).select("partnerRating");
+
+    const avgRating =
+      ratedOrders.length > 0
+        ? (
+            ratedOrders.reduce((a, b) => a + b.partnerRating, 0) /
+            ratedOrders.length
+          ).toFixed(1)
+        : 0;
+
+    res.json({
+      success: true,
+      acceptanceRate:
+        totalAssigned === 0
+          ? 0
+          : Math.round((accepted / totalAssigned) * 100),
+
+      cancellationRate:
+        totalAssigned === 0
+          ? 0
+          : Math.round((cancelled / totalAssigned) * 100),
+
+      totalOrders: totalAssigned,
+      delivered,
+      avgRating,
+      totalRatings: ratedOrders.length
+    });
+
+  } catch (err) {
+    res.status(500).json({
+      success: false,
+      message: err.message
     });
   }
 };
