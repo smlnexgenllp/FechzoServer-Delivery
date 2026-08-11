@@ -12,6 +12,7 @@ const { ExpressAdapter } = require('@bull-board/express');
 const http = require('http');
 const { Server } = require('socket.io');
 const cookieParser = require('cookie-parser');
+
 // Load environment variables
 dotenv.config();
 
@@ -193,6 +194,9 @@ const deliveryPartnerRoutes = require("./routes/delivery/deliveryPartner.routes.
 const deliveryPartnerOrderRoutes = require(
   "./routes/deliveryPartner/order.routes"
 );
+
+const categoryRoutes = require("../FechzoServer/routes/marketplace/categoryRoutes.js");
+const productRoutes = require("../FechzoServer/routes/marketplace/productRoutes.js");
 const notificationRoute = require("./routes/deliveryPartner/notificationRoute.js");
 const partnerRoutes = require("./routes/partner/index.js");
 const { acceptInvite } = require("./controllers/restaurants/outlet/ContactController.js");
@@ -232,6 +236,8 @@ connectDB()
     app.use('/api/maps', mapsRoutes);
     app.use("/api/delivery-partner", deliveryPartnerRoutes);
     app.use("/api/partner", partnerRoutes);
+    app.use("/api/categories", categoryRoutes);
+    app.use("/api/products", productRoutes);
     // app.use('/api/offers', offerRoutes);
     // app.use('/api/restaurants', branchRoutes);
     // app.use('/api/performance', performanceRoutes);
