@@ -327,76 +327,67 @@ message:err.message
 
 };
 
+// Get Wallet Summary (correct balance calculation)
+exports.getWalletSummary = async (req, res) => {
+  try {
+    const partnerId = req.partner._id;
 
+    let wallet = await Wallet.findOne({ partnerId });
 
+    if (!wallet) {
+      wallet = await Wallet.create({ partnerId });
+    }
 
-// Wallet Summary
+    // Today's fuel (optional - already have separate API)
+    const start = new Date();
+    start.setHours(0, 0, 0, 0);
+    const end = new Date();
+    end.setHours(23, 59, 59, 999);
 
-exports.getWalletSummary=async(req,res)=>{
+    const todayFuel = await FuelEntry.aggregate([
+      {
+        $match: {
+          partnerId,
+          createdAt: { $gte: start, $lte: end },
+        },
+      },
+      {
+        $group: {
+          _id: null,
+          totalFuel: { $sum: "$amount" },
+        },
+      },
+    ]);
 
-try{
+    // ✅ Correct Balance Formula
+    // balance = totalEarned - totalWithdrawn - totalFuelExpenses
+    // (Assuming you already update totalEarned on order delivery
+    //  and totalWithdrawn only when admin APPROVES withdrawal)
 
-const partnerId=req.partner._id;
+    const balance =
+      (wallet.totalEarned || 0) -
+      (wallet.totalWithdrawn || 0) -
+      (wallet.totalFuelExpense || 0);
 
-const wallet=await Wallet.findOne({partnerId});
+    // Keep wallet.balance in sync
+    if (wallet.balance !== balance) {
+      wallet.balance = balance;
+      await wallet.save();
+    }
 
-const fuel=await FuelEntry.aggregate([
-
-{
-
-$match:{
-partnerId
-}
-
-},
-
-{
-
-$group:{
-
-_id:null,
-
-totalFuel:{
-$sum:"$amount"
-},
-
-totalLitres:{
-$sum:"$litres"
-}
-
-}
-
-}
-
-]);
-
-res.json({
-
-success:true,
-
-balance:wallet?.balance||0,
-
-totalEarned:wallet?.totalEarned||0,
-
-totalWithdrawn:wallet?.totalWithdrawn||0,
-
-totalFuel:fuel[0]?.totalFuel||0,
-
-totalLitres:fuel[0]?.totalLitres||0
-
-});
-
-}catch(err){
-
-res.status(500).json({
-
-success:false,
-message:err.message
-
-});
-
-}
-
+    res.json({
+      success: true,
+      balance: wallet.balance,
+      totalEarned: wallet.totalEarned || 0,
+      totalWithdrawn: wallet.totalWithdrawn || 0,
+      totalFuel: todayFuel[0]?.totalFuel || 0,
+    });
+  } catch (err) {
+    res.status(500).json({
+      success: false,
+      message: err.message,
+    });
+  }
 };
 exports.getTodayFuel = async (req, res) => {
   try {
