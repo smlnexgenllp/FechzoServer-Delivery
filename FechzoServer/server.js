@@ -27,6 +27,7 @@ const BASE_URLS = {
     ]
   : [
       'http://localhost:5173',
+      'http://localhost:5174',
       'capacitor://localhost'
     ],
 
@@ -209,6 +210,7 @@ const walletRoutes=require("./routes/deliverypartner/walletRoutes");
 // const performanceRoutes = require('./routes/performance/performanceRoutes');
 // const numbersRoutes = require('./routes/outlet/numbersRoutes');
 // const shopRoutes = require('./routes/shops/shopRoutes');
+const storeRoutes = require('./routes/marketplace/storeRoutes');
 
 require('./controllers/restaurants/Logcontroller/AutoFinalizeOperatingHoursJob');
 require('./controllers/restaurants/Logcontroller/AutoOpenOperatingHoursJob');
@@ -248,6 +250,8 @@ connectDB()
     app.use("/api/delivery-partner",walletRoutes);
     app.use("/api/delivery-partner/orders", deliveryPartnerOrderRoutes);
     // Root route - serves the landing page
+    app.use('/api/stores', storeRoutes);
+
     app.get('/', (req, res) => {
       res.send("Welcome to Fechzo");
     });
