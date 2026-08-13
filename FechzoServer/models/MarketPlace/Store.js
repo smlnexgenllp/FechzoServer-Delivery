@@ -1,237 +1,110 @@
-const mongoose = require("mongoose");
+const mongoose = require('mongoose');
 
 const storeSchema = new mongoose.Schema(
   {
-    storeId: {
-      type: String,
-      required: true,
-      unique: true
-    },
-
-    categoryId: {
+    owner: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: "Category",
-      required: true
+      ref: 'User',
+      required: false,   // ← changed from true to false
+      default: null,
     },
-
-    categorySlug: {
-      type: String,
-      required: true,
-      enum: [
-        "grocery",
-        "fashion",
-        "electronics",
-        "pharmacy",
-        "bakery",
-        "meat",
-        "other"
-      ]
-    },
-
     storeName: {
       type: String,
+      required: [true, 'Store name is required'],
+      trim: true,
+    },
+    storeType: {
+      type: String,
+      enum: ['grocery', 'fashion', 'electronic'],
       required: true,
-      trim: true
     },
-
-    ownerDetails: {
-      fullName: {
-        type: String,
-        required: true
-      },
-
-      phone: {
-        type: String,
-        required: true,
-        match: [/^\d{10}$/, "Invalid phone number"]
-      },
-
-      email: {
-        type: String,
-        required: true,
-        match: [/^\S+@\S+\.\S+$/, "Invalid email format"]
-      }
+    description: {
+      type: String,
+      trim: true,
     },
-
+    // Contact
+    phone: {
+      type: String,
+      required: true,
+    },
+    email: {
+      type: String,
+      required: true,
+      lowercase: true,
+    },
+    // Address
     address: {
-      shopNumber: String,
       street: String,
-      area: {
-        type: String,
-        required: true
-      },
-      city: {
-        type: String,
-        required: true
-      },
-      state: {
-        type: String,
-        required: true
-      },
-      postalCode: {
-        type: String,
-        required: true,
-        match: [/^\d{6}$/, "Invalid postal code"]
-      },
+      city: String,
+      state: String,
+      pincode: String,
       landmark: String,
-      latitude: String,
-      longitude: String,
-      mapLink: String
+      coordinates: {
+        type: { type: String, enum: ['Point'], default: 'Point' },
+        coordinates: { type: [Number], default: [0, 0] }, // [lng, lat]
+      },
     },
-
-    images: {
-      profile: String,
-      cover: String,
-      gallery: {
-        type: [String],
-        default: []
-      }
+    // Documents for verification
+    documents: {
+      gstNumber: String,
+      gstCertificate: String,
+      panNumber: String,
+      panCard: String,
+      aadhaarNumber: String,
+      aadhaarCard: String,
+      shopLicense: String,
+      cancelledCheque: String,
     },
-
-    contact: {
-      phone: String,
-      alternatePhone: String,
-      email: String
-    },
-
-    timings: {
-      Monday: {
-        open: String,
-        close: String,
-        isOpen: {
-          type: Boolean,
-          default: true
-        }
-      },
-      Tuesday: {
-        open: String,
-        close: String,
-        isOpen: {
-          type: Boolean,
-          default: true
-        }
-      },
-      Wednesday: {
-        open: String,
-        close: String,
-        isOpen: {
-          type: Boolean,
-          default: true
-        }
-      },
-      Thursday: {
-        open: String,
-        close: String,
-        isOpen: {
-          type: Boolean,
-          default: true
-        }
-      },
-      Friday: {
-        open: String,
-        close: String,
-        isOpen: {
-          type: Boolean,
-          default: true
-        }
-      },
-      Saturday: {
-        open: String,
-        close: String,
-        isOpen: {
-          type: Boolean,
-          default: true
-        }
-      },
-      Sunday: {
-        open: String,
-        close: String,
-        isOpen: {
-          type: Boolean,
-          default: true
-        }
-      }
-    },
-
-    legalDetails: {
-      gstNumber: {
-        type: String,
-        default: ""
-      },
-
-      panNumber: {
-        type: String,
-        default: ""
-      },
-
-      gstRegistered: {
-        type: Boolean,
-        default: false
-      },
-
-      licenseNumber: {
-        type: String,
-        default: ""
-      },
-
-      licenseDocument: {
-        type: String,
-        default: ""
-      }
-    },
-
+    // Bank details
     bankDetails: {
       accountHolderName: String,
-      bankName: String,
-      branchName: String,
       accountNumber: String,
       ifscCode: String,
-      accountType: {
-        type: String,
-        enum: ["Savings", "Current"]
-      }
+      bankName: String,
+      upiId: String,
     },
+    // Media
+    logo: String,
+    banner: String,
+    images: [String],
 
-    services: {
-      delivery: {
-        type: Boolean,
-        default: true
-      },
-
-      pickup: {
-        type: Boolean,
-        default: true
-      },
-
-      storePickup: {
-        type: Boolean,
-        default: false
-      }
-    },
-
-    approvalStatus: {
+    // Status & admin control
+    status: {
       type: String,
-      enum: ["Pending", "Approved", "Rejected"],
-      default: "Pending"
+      enum: ['pending', 'approved', 'rejected', 'suspended', 'blocked'],
+      default: 'pending',
     },
+    rejectionReason: String,
+    suspensionReason: String,
 
-    rejectionReason: {
-      type: String,
-      default: ""
-    },
+    // Operating
+    isOpen: { type: Boolean, default: false },
+    operatingHours: [
+      {
+        day: {
+          type: String,
+          enum: ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'],
+        },
+        open: String,
+        close: String,
+        isClosed: { type: Boolean, default: false },
+      },
+    ],
 
-    isActive: {
-      type: Boolean,
-      default: true
-    }
+    commissionPercent: { type: Number, default: 10 },
+
+    allowedCategories: [
+      { type: mongoose.Schema.Types.ObjectId, ref: 'Category' },
+    ],
+
+    isDeleted: { type: Boolean, default: false },
   },
-  {
-    timestamps: true
-  }
+  { timestamps: true }
 );
 
-module.exports = mongoose.model(
-  "Store",
-  storeSchema,
-  "stores"
-);
+// Indexes
+storeSchema.index({ 'address.coordinates': '2dsphere' });
+storeSchema.index({ storeType: 1, status: 1 });
+storeSchema.index({ owner: 1 });
+
+module.exports = mongoose.model('Store', storeSchema);
