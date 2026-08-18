@@ -1,7 +1,36 @@
-const Store = require('../../models/marketplace/Store');
-const asyncHandler = require('express-async-handler'); // or your own wrapper
+const Store = require("../../models/marketplace/Store");
+const asyncHandler = require("express-async-handler");
+const uploadToCloudinary = require("../../utils/uploadToCloudinary");
 
+// ====================== HELPERS ======================
+const parseJSON = (value, fallback = {}) => {
+  try {
+    return typeof value === "string" ? JSON.parse(value || "{}") : value || fallback;
+  } catch {
+    return fallback;
+  }
+};
+
+const getFileUrl = async (files, fieldName, folder) => {
+  if (!files?.[fieldName]?.[0]) return null;
+  return await uploadToCloudinary(files[fieldName][0].buffer, folder);
+};
+
+const getMultipleUrls = async (files, fieldName, folder) => {
+  if (!files?.[fieldName]?.length) return [];
+  return Promise.all(
+    files[fieldName].map((file) => uploadToCloudinary(file.buffer, folder))
+  );
+};
+
+// ====================== REGISTER STORE (PUBLIC) ======================
+// @desc    Register a new store (No login required)
+// @route   POST /api/stores/register
+// @access  Public
 const registerStore = asyncHandler(async (req, res) => {
+  // Safe – works even if user is not logged in
+  const userId = req.user?._id || req.user?.id || req.user?.adminId || null;
+
   const {
     storeName,
     storeType,
@@ -11,10 +40,10 @@ const registerStore = asyncHandler(async (req, res) => {
     address,
     documents,
     bankDetails,
-    logo,
-    banner,
-    images,
     operatingHours,
+    ownerDetails,
+    deliveryRadius,
+    minOrderValue,
   } = req.body;
 
   if (!storeName || !storeType || !phone || !email) {
@@ -22,30 +51,95 @@ const registerStore = asyncHandler(async (req, res) => {
     throw new Error("storeName, storeType, phone and email are required");
   }
 
+  // Only check duplicate if user is logged in
+  if (userId) {
+    const existing = await Store.findOne({
+      owner: userId,
+      storeName: storeName.trim(),
+      isDeleted: false,
+    });
+    if (existing) {
+      res.status(400);
+      throw new Error("You already have a store with this name");
+    }
+  }
+
+  const files = req.files || {};
+
+  // Upload all files in parallel
+  const [
+    logo,
+    banner,
+    storefrontImage,
+    interiorImages,
+    kitchenImages,
+    packagingImages,
+    images,
+    gstCertificate,
+    panCard,
+    aadhaarCard,
+    shopLicense,
+    fssaiCertificate,
+    cancelledCheque,
+    addressProof,
+  ] = await Promise.all([
+    getFileUrl(files, "logo", "stores/logo"),
+    getFileUrl(files, "banner", "stores/banner"),
+    getFileUrl(files, "storefrontImage", "stores/storefront"),
+    getMultipleUrls(files, "interiorImages", "stores/interior"),
+    getMultipleUrls(files, "kitchenImages", "stores/kitchen"),
+    getMultipleUrls(files, "packagingImages", "stores/packaging"),
+    getMultipleUrls(files, "images", "stores/gallery"),
+    getFileUrl(files, "gstCertificate", "stores/documents"),
+    getFileUrl(files, "panCard", "stores/documents"),
+    getFileUrl(files, "aadhaarCard", "stores/documents"),
+    getFileUrl(files, "shopLicense", "stores/documents"),
+    getFileUrl(files, "fssaiCertificate", "stores/documents"),
+    getFileUrl(files, "cancelledCheque", "stores/documents"),
+    getFileUrl(files, "addressProof", "stores/documents"),
+  ]);
+
   const store = await Store.create({
-    // owner is optional for now (or you can later link it after login)
-    storeName,
+    owner: userId, // null if not logged in
+    storeName: storeName.trim(),
     storeType,
     description,
     phone,
-    email,
-    address,
-    documents,
-    bankDetails,
+    email: email.toLowerCase(),
+    address: parseJSON(address),
+    documents: {
+      ...parseJSON(documents),
+      gstCertificate,
+      panCard,
+      aadhaarCard,
+      shopLicense,
+      fssaiCertificate,
+      cancelledCheque,
+      addressProof,
+    },
+    bankDetails: parseJSON(bankDetails),
     logo,
     banner,
+    storefrontImage,
+    interiorImages,
+    kitchenImages,
+    packagingImages,
     images,
-    operatingHours,
+    operatingHours: parseJSON(operatingHours, []),
+    ownerDetails: parseJSON(ownerDetails),
+    deliveryRadius: Number(deliveryRadius) || 5,
+    minOrderValue: Number(minOrderValue) || 0,
     status: "pending",
   });
 
-  // Optional: notify admin
+  // Notify admin
   const io = req.app.get("io");
   if (io) {
     io.to("admin-channel").emit("newStoreRegistration", {
       storeId: store._id,
       storeName: store.storeName,
       storeType: store.storeType,
+      ownerId: userId,
     });
   }
 
@@ -56,62 +150,85 @@ const registerStore = asyncHandler(async (req, res) => {
   });
 });
 
-// @desc    Get my stores
-// @route   GET /api/stores/my
-// @access  Private
+// ====================== GET MY STORES ======================
 const getMyStores = asyncHandler(async (req, res) => {
+  const userId = req.user?._id || req.user?.id || req.user?.adminId;
+
+  if (!userId) {
+    res.status(401);
+    throw new Error("Not authorized");
+  }
+
   const stores = await Store.find({
-    owner: req.user._id,
+    owner: userId,
     isDeleted: false,
   }).sort({ createdAt: -1 });
 
-  res.json({ success: true, data: stores });
+  res.json({ success: true, count: stores.length, data: stores });
 });
 
-// @desc    Get single store (owner or admin)
-// @route   GET /api/stores/:id
-// @access  Private
+// ====================== GET STORE BY ID ======================
 const getStoreById = asyncHandler(async (req, res) => {
-  const store = await Store.findById(req.params.id).populate('owner', 'name email phone');
+  const store = await Store.findById(req.params.id).populate(
+    "owner",
+    "name email phone"
+  );
 
   if (!store || store.isDeleted) {
     res.status(404);
-    throw new Error('Store not found');
+    throw new Error("Store not found");
   }
 
-  // Owner or admin only
-  if (
-    store.owner._id.toString() !== req.user._id.toString() &&
-    req.user.role !== 'admin'
-  ) {
+  const userId = (req.user?._id || req.user?.id || req.user?.adminId)?.toString();
+  const isOwner = store.owner && store.owner._id?.toString() === userId;
+  const isAdmin = req.user?.role === "admin";
+
+  if (!isOwner && !isAdmin) {
     res.status(403);
-    throw new Error('Not authorized');
+    throw new Error("Not authorized");
   }
 
   res.json({ success: true, data: store });
 });
 
-// @desc    Update store (owner can update only while pending / approved)
-// @route   PUT /api/stores/:id
-// @access  Private
+// ====================== UPDATE STORE ======================
 const updateStore = asyncHandler(async (req, res) => {
   const store = await Store.findById(req.params.id);
 
   if (!store || store.isDeleted) {
     res.status(404);
-    throw new Error('Store not found');
+    throw new Error("Store not found");
   }
 
-  if (store.owner.toString() !== req.user._id.toString()) {
+  const userId = (req.user?._id || req.user?.id || req.user?.adminId)?.toString();
+  const isOwner = store.owner && store.owner.toString() === userId;
+  const isAdmin = req.user?.role === "admin";
+
+  if (!isOwner && !isAdmin) {
     res.status(403);
-    throw new Error('Not authorized');
+    throw new Error("Not authorized");
   }
 
-  // Prevent changing critical fields after approval if you want
   const allowedUpdates = [
-    'storeName', 'description', 'phone', 'email',
-    'address', 'documents', 'bankDetails',
-    'logo', 'banner', 'images', 'operatingHours', 'isOpen',
+    "storeName",
+    "description",
+    "phone",
+    "email",
+    "address",
+    "documents",
+    "bankDetails",
+    "logo",
+    "banner",
+    "storefrontImage",
+    "interiorImages",
+    "kitchenImages",
+    "packagingImages",
+    "images",
+    "operatingHours",
+    "isOpen",
+    "deliveryRadius",
+    "minOrderValue",
+    "ownerDetails",
   ];
 
   allowedUpdates.forEach((field) => {
@@ -120,62 +237,92 @@ const updateStore = asyncHandler(async (req, res) => {
     }
   });
 
-  // If previously rejected, reset to pending on re-submit
-  if (store.status === 'rejected') {
-    store.status = 'pending';
+  if (store.status === "rejected") {
+    store.status = "pending";
     store.rejectionReason = undefined;
   }
 
   await store.save();
 
-  res.json({ success: true, message: 'Store updated', data: store });
+  res.json({ success: true, message: "Store updated", data: store });
 });
 
-// @desc    Admin – list all pending stores
-// @route   GET /api/stores/admin/pending
-// @access  Admin
+// ====================== ADMIN – PENDING STORES ======================
 const getPendingStores = asyncHandler(async (req, res) => {
-  const stores = await Store.find({ status: 'pending', isDeleted: false })
-    .populate('owner', 'name email phone')
+  const stores = await Store.find({ status: "pending", isDeleted: false })
+    .populate("owner", "name email phone")
     .sort({ createdAt: -1 });
 
-  res.json({ success: true, data: stores });
+  res.json({ success: true, count: stores.length, data: stores });
 });
 
-// @desc    Admin – approve / reject / suspend
-// @route   PATCH /api/stores/admin/:id/status
-// @access  Admin
+// ====================== ADMIN – ALL STORES ======================
+const getAllStores = asyncHandler(async (req, res) => {
+  const { status, storeType } = req.query;
+
+  const filter = { isDeleted: false };
+  if (status) filter.status = status;
+  if (storeType) filter.storeType = storeType;
+
+  const stores = await Store.find(filter)
+    .populate("owner", "name email phone")
+    .sort({ createdAt: -1 });
+
+  res.json({ success: true, count: stores.length, data: stores });
+});
+
+// ====================== ADMIN – UPDATE STATUS ======================
 const updateStoreStatus = asyncHandler(async (req, res) => {
   const { status, reason } = req.body;
 
-  if (!['approved', 'rejected', 'suspended', 'blocked'].includes(status)) {
+  if (!["approved", "rejected", "suspended", "blocked"].includes(status)) {
     res.status(400);
-    throw new Error('Invalid status');
+    throw new Error("Invalid status. Use: approved, rejected, suspended, blocked");
   }
 
   const store = await Store.findById(req.params.id);
-  if (!store) {
+  if (!store || store.isDeleted) {
     res.status(404);
-    throw new Error('Store not found');
+    throw new Error("Store not found");
   }
 
   store.status = status;
-  if (status === 'rejected') store.rejectionReason = reason;
-  if (status === 'suspended' || status === 'blocked') store.suspensionReason = reason;
+
+  if (status === "rejected") {
+    store.rejectionReason = reason || "No reason provided";
+  }
+  if (status === "suspended" || status === "blocked") {
+    store.suspensionReason = reason || "No reason provided";
+  }
+  if (status === "approved") {
+    store.rejectionReason = undefined;
+    store.suspensionReason = undefined;
+  }
 
   await store.save();
 
-  // Notify the store owner via socket
-  const io = req.app.get('io');
-  if (io) {
-    io.to(`partner_${store.owner}`).emit('storeStatusUpdated', {
+  const io = req.app.get("io");
+  if (io && store.owner) {
+    io.to(`partner_${store.owner}`).emit("storeStatusUpdated", {
       storeId: store._id,
       status,
       reason,
     });
   }
 
-  res.json({ success: true, message: `Store ${status}`, data: store });
+  if (io) {
+    io.to("admin-channel").emit("storeStatusChanged", {
+      storeId: store._id,
+      storeName: store.storeName,
+      status,
+    });
+  }
+
+  res.json({
+    success: true,
+    message: `Store ${status} successfully`,
+    data: store,
+  });
 });
 
 module.exports = {
@@ -184,5 +331,6 @@ module.exports = {
   getStoreById,
   updateStore,
   getPendingStores,
+  getAllStores,
   updateStoreStatus,
 };
