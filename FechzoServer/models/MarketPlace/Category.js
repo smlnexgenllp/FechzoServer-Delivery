@@ -6,14 +6,14 @@ const categorySchema = new mongoose.Schema(
       type: String,
       required: true,
       unique: true,
-      trim: true
+      trim: true,
     },
 
     name: {
       type: String,
       required: true,
       unique: true,
-      trim: true
+      trim: true,
     },
 
     slug: {
@@ -21,37 +21,48 @@ const categorySchema = new mongoose.Schema(
       required: true,
       unique: true,
       lowercase: true,
-      trim: true
+      trim: true,
     },
 
     description: {
       type: String,
-      default: ""
+      default: "",
     },
 
     icon: {
       type: String,
-      default: ""
+      default: "",
     },
 
     image: {
       type: String,
-      default: ""
+      default: "",
+    },
+
+    parentCategory: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "MarketplaceCategory",
+      default: null,
     },
 
     isActive: {
       type: Boolean,
-      default: true
+      default: true,
     },
 
     sortOrder: {
       type: Number,
-      default: 0
-    }
+      default: 0,
+    },
   },
-  { timestamps: true }
+  {
+    timestamps: true,
+  }
 );
 
 module.exports =
-  mongoose.models.Category ||
-  mongoose.model("Category", categorySchema);
+  mongoose.models.MarketplaceCategory ||
+  mongoose.model(
+    "MarketplaceCategory",
+    categorySchema
+  );

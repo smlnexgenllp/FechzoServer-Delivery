@@ -2,7 +2,9 @@ const mongoose = require("mongoose");
 
 const storeSchema = new mongoose.Schema(
   {
-    // Owner (optional for public registration)
+    // =========================
+    // OWNER
+    // =========================
     owner: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
@@ -10,6 +12,9 @@ const storeSchema = new mongoose.Schema(
       default: null,
     },
 
+    // =========================
+    // STORE BASIC DETAILS
+    // =========================
     storeName: {
       type: String,
       required: [true, "Store name is required"],
@@ -25,98 +30,280 @@ const storeSchema = new mongoose.Schema(
     description: {
       type: String,
       trim: true,
+      default: "",
     },
 
-    // Contact
+    // =========================
+    // STORE LOGIN
+    // =========================
+    loginCredentials: {
+      username: {
+        type: String,
+        required: true,
+        unique: true,
+        lowercase: true,
+        trim: true,
+      },
+
+      password: {
+        type: String,
+        required: true,
+      },
+    },
+
+    // =========================
+    // CONTACT
+    // =========================
     phone: {
       type: String,
       required: true,
+      trim: true,
     },
+
     email: {
       type: String,
       required: true,
       lowercase: true,
+      trim: true,
     },
 
-    // Owner / POC details
+    // =========================
+    // OWNER / POC DETAILS
+    // =========================
     ownerDetails: {
-      name: String,
-      phone: String,
-      email: String,
+      name: {
+        type: String,
+        trim: true,
+      },
+
+      phone: {
+        type: String,
+        trim: true,
+      },
+
+      email: {
+        type: String,
+        lowercase: true,
+        trim: true,
+      },
+
       designation: {
         type: String,
         default: "Owner",
+        trim: true,
       },
     },
 
-    // Address
+    // =========================
+    // ADDRESS
+    // =========================
     address: {
-      street: String,
-      city: String,
-      state: String,
-      pincode: String,
-      landmark: String,
-      fullAddress: String,
+      street: {
+        type: String,
+        default: "",
+      },
+
+      city: {
+        type: String,
+        default: "",
+      },
+
+      state: {
+        type: String,
+        default: "",
+      },
+
+      pincode: {
+        type: String,
+        default: "",
+      },
+
+      landmark: {
+        type: String,
+        default: "",
+      },
+
+      fullAddress: {
+        type: String,
+        default: "",
+      },
+
       coordinates: {
         type: {
           type: String,
           enum: ["Point"],
           default: "Point",
         },
+
         coordinates: {
-          type: [Number], // [longitude, latitude]
+          type: [Number],
           default: [0, 0],
         },
       },
     },
 
-    // Documents
+    // =========================
+    // DOCUMENTS
+    // =========================
     documents: {
-      gstNumber: String,
-      gstCertificate: String, // Cloudinary URL
-      panNumber: String,
-      panCard: String, // Cloudinary URL
-      aadhaarNumber: String,
-      aadhaarCard: String, // Cloudinary URL
-      shopLicense: String, // Cloudinary URL
-      fssaiNumber: String,
-      fssaiCertificate: String, // Cloudinary URL
-      cancelledCheque: String, // Cloudinary URL
-      addressProof: String, // Cloudinary URL
+      gstNumber: {
+        type: String,
+        default: "",
+      },
+
+      gstCertificate: {
+        type: String,
+        default: "",
+      },
+
+      panNumber: {
+        type: String,
+        default: "",
+      },
+
+      panCard: {
+        type: String,
+        default: "",
+      },
+
+      aadhaarNumber: {
+        type: String,
+        default: "",
+      },
+
+      aadhaarCard: {
+        type: String,
+        default: "",
+      },
+
+      shopLicense: {
+        type: String,
+        default: "",
+      },
+
+      fssaiNumber: {
+        type: String,
+        default: "",
+      },
+
+      fssaiCertificate: {
+        type: String,
+        default: "",
+      },
+
+      cancelledCheque: {
+        type: String,
+        default: "",
+      },
+
+      addressProof: {
+        type: String,
+        default: "",
+      },
     },
 
-    // Bank Details
+    // =========================
+    // BANK DETAILS
+    // =========================
     bankDetails: {
-      accountHolderName: String,
-      accountNumber: String,
-      ifscCode: String,
-      bankName: String,
-      upiId: String,
+      accountHolderName: {
+        type: String,
+        default: "",
+      },
+
+      accountNumber: {
+        type: String,
+        default: "",
+      },
+
+      ifscCode: {
+        type: String,
+        default: "",
+      },
+
+      bankName: {
+        type: String,
+        default: "",
+      },
+
+      upiId: {
+        type: String,
+        default: "",
+      },
     },
 
-    // Media
-    logo: String,
-    banner: String,
-    storefrontImage: String,
-    interiorImages: [String],
-    kitchenImages: [String],
-    packagingImages: [String],
-    images: [String],
+    // =========================
+    // MEDIA
+    // =========================
+    logo: {
+      type: String,
+      default: "",
+    },
 
-    // Status & Admin Control
+    banner: {
+      type: String,
+      default: "",
+    },
+
+    storefrontImage: {
+      type: String,
+      default: "",
+    },
+
+    interiorImages: {
+      type: [String],
+      default: [],
+    },
+
+    kitchenImages: {
+      type: [String],
+      default: [],
+    },
+
+    packagingImages: {
+      type: [String],
+      default: [],
+    },
+
+    images: {
+      type: [String],
+      default: [],
+    },
+
+    // =========================
+    // STATUS / ADMIN CONTROL
+    // =========================
     status: {
       type: String,
-      enum: ["pending", "approved", "rejected", "suspended", "blocked"],
+      enum: [
+        "pending",
+        "approved",
+        "rejected",
+        "suspended",
+        "blocked",
+      ],
       default: "pending",
+      index: true,
     },
-    rejectionReason: String,
-    suspensionReason: String,
 
-    // Operating
+    rejectionReason: {
+      type: String,
+      default: "",
+    },
+
+    suspensionReason: {
+      type: String,
+      default: "",
+    },
+
+    // =========================
+    // OPERATING STATUS
+    // =========================
     isOpen: {
       type: Boolean,
       default: false,
     },
+
     operatingHours: [
       {
         day: {
@@ -131,8 +318,17 @@ const storeSchema = new mongoose.Schema(
             "sunday",
           ],
         },
-        open: String,
-        close: String,
+
+        open: {
+          type: String,
+          default: "",
+        },
+
+        close: {
+          type: String,
+          default: "",
+        },
+
         isClosed: {
           type: Boolean,
           default: false,
@@ -140,20 +336,34 @@ const storeSchema = new mongoose.Schema(
       },
     ],
 
+    // =========================
+    // DELIVERY SETTINGS
+    // =========================
     deliveryRadius: {
       type: Number,
-      default: 5, // in km
+      default: 5,
+      min: 0,
     },
+
     minOrderValue: {
       type: Number,
       default: 0,
+      min: 0,
     },
 
+    // =========================
+    // COMMISSION
+    // =========================
     commissionPercent: {
       type: Number,
       default: 10,
+      min: 0,
+      max: 100,
     },
 
+    // =========================
+    // ALLOWED CATEGORIES
+    // =========================
     allowedCategories: [
       {
         type: mongoose.Schema.Types.ObjectId,
@@ -161,9 +371,13 @@ const storeSchema = new mongoose.Schema(
       },
     ],
 
+    // =========================
+    // SOFT DELETE
+    // =========================
     isDeleted: {
       type: Boolean,
       default: false,
+      index: true,
     },
   },
   {
@@ -171,12 +385,52 @@ const storeSchema = new mongoose.Schema(
   }
 );
 
-// Indexes
-storeSchema.index({ "address.coordinates": "2dsphere" });
-storeSchema.index({ storeType: 1, status: 1 });
-storeSchema.index({ owner: 1 });
-storeSchema.index({ status: 1, isDeleted: 1 });
-storeSchema.index({ email: 1 });
-storeSchema.index({ phone: 1 });
+// =====================================================
+// INDEXES
+// =====================================================
 
-module.exports = mongoose.model("Store", storeSchema);
+// Location search
+storeSchema.index({
+  "address.coordinates": "2dsphere",
+});
+
+// Store type + status
+storeSchema.index({
+  storeType: 1,
+  status: 1,
+});
+
+// Owner stores
+storeSchema.index({
+  owner: 1,
+});
+
+// Status + deleted
+storeSchema.index({
+  status: 1,
+  isDeleted: 1,
+});
+
+// Contact search
+storeSchema.index({
+  email: 1,
+});
+
+storeSchema.index({
+  phone: 1,
+});
+
+// Store login username
+storeSchema.index({
+  "loginCredentials.username": 1,
+});
+
+// =====================================================
+// MODEL
+// =====================================================
+
+// IMPORTANT:
+// Prevent OverwriteModelError
+module.exports =
+  mongoose.models.Store ||
+  mongoose.model("Store", storeSchema, "stores");

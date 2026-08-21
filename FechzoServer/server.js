@@ -211,7 +211,8 @@ const walletRoutes=require("./routes/deliverypartner/walletRoutes");
 // const numbersRoutes = require('./routes/outlet/numbersRoutes');
 // const shopRoutes = require('./routes/shops/shopRoutes');
 const storeRoutes = require('./routes/marketplace/storeRoutes');
-
+const storeAuthRoutes = require("./routes/marketplace/storeAuthRoutes");
+const uploadRoutes = require("./routes/marketplace/uploadRoutes");
 require('./controllers/restaurants/Logcontroller/AutoFinalizeOperatingHoursJob');
 require('./controllers/restaurants/Logcontroller/AutoOpenOperatingHoursJob');
 
@@ -251,7 +252,8 @@ connectDB()
     app.use("/api/delivery-partner/orders", deliveryPartnerOrderRoutes);
     // Root route - serves the landing page
     app.use('/api/stores', storeRoutes);
-
+    app.use("/api/stores/auth", storeAuthRoutes);
+    app.use("/api/upload",uploadRoutes);
     app.get('/', (req, res) => {
       res.send("Welcome to Fechzo");
     });
