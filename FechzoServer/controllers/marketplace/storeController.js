@@ -1,4 +1,4 @@
-const Store = require("../../models/marketplace/Store");
+const Store = require("../../models/MarketPlace/Store");
 const asyncHandler = require("express-async-handler");
 const uploadToCloudinary = require("../../utils/uploadToCloudinary");
 const bcrypt = require("bcryptjs");
