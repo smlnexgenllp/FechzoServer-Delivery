@@ -187,6 +187,7 @@ const adminRoutes = require('./routes/admin/adminRoutes');
 const foodRoutes = require('./routes/food/foodRoutes');
 const authRoutes = require('./routes/auth/authRoutes');
 const adminnotificationRoutes = require('./routes/admin/adminnotificationRoutes');
+const wishlistRoutes = require('./routes/marketplace/wishlistRoutes.js')
 // server.js (partial)
 const outletRoutes = require('./routes/restaurants/outlet/outletRoutes');
 const adsRoutes = require('./routes/restaurants/ads/Adsroutes');
@@ -254,6 +255,7 @@ connectDB()
     app.use('/api/stores', storeRoutes);
     app.use("/api/stores/auth", storeAuthRoutes);
     app.use("/api/upload",uploadRoutes);
+    app.use("/api/wishlist", wishlistRoutes);
     app.get('/', (req, res) => {
       res.send("Welcome to Fechzo");
     });

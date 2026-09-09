@@ -9,19 +9,35 @@ const {
   createCategory,
 } = require("../../controllers/marketplace/categoryController");
 
-// Main categories
+// =====================================================
+// MAIN CATEGORIES
+// GET /api/categories
+// =====================================================
+
 router.get("/", getCategories);
 
-// All categories
+// =====================================================
+// ALL CATEGORIES
+// GET /api/categories/all
+// =====================================================
+
 router.get("/all", getAllCategories);
 
-// Product/Sub categories
+// =====================================================
+// SUB CATEGORIES
+// GET /api/categories/product-categories?categoryId=xxx
+// =====================================================
+
 router.get(
   "/product-categories",
   getProductCategories
 );
 
-// Create category
+// =====================================================
+// CREATE CATEGORY
+// POST /api/categories
+// =====================================================
+
 router.post("/", createCategory);
 
 module.exports = router;
