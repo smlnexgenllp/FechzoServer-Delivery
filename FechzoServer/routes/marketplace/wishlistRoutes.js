@@ -6,9 +6,9 @@ const {
   removeFromWishlist,
   getWishlist,
   checkWishlist,
-} = require("../controllers/wishlistController");
+} = require("../../controllers/marketplace/wishlistController");
 
-const authMiddleware = require("../middleware/authMiddleware");
+const authMiddleware = require("../../middleware/auth/authMiddleware");
 
 router.post("/", authMiddleware, addToWishlist);
 
