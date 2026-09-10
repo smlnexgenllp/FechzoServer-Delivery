@@ -1,84 +1,396 @@
 const mongoose = require("mongoose");
-const Product = require("../../models/MarketPlace/Product");
 
-/* =========================================================
-   HELPERS
-========================================================= */
+const Product = require("../../models/MarketPlace/Product");
+const Store = require("../../models/MarketPlace/Store");
+const Category = require("../../models/MarketPlace/MarketplaceCategory");
+
+// =====================================================
+// HELPERS
+// =====================================================
 
 const isValidObjectId = (id) => {
   return mongoose.Types.ObjectId.isValid(id);
 };
 
-const populateProduct = (query) => {
-  return query
-    .populate("mainCategory", "categoryId name slug")
-    .populate("productCategory", "categoryId name slug")
-    .populate(
-      "storeId",
-      "storeName storeType logo banner phone email status"
-    )
-    .populate("branchId");
+const createSlug = (text = "") => {
+  return text
+    .toString()
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
 };
 
+// =====================================================
+// ALLOWED GENDERS
+// =====================================================
 
-/* =========================================================
-   GET ALL MARKETPLACE PRODUCTS
-   Customer-facing API
+const ALLOWED_GENDERS = [
+  "men",
+  "women",
+  "boys",
+  "girls",
+  "baby-kids",
+  "unisex",
+];
 
-   Supports:
-   - category
-   - productCategory
-   - storeId
-   - branchId
-   - search
-   - minPrice
-   - maxPrice
-   - sort
-   - page
-   - limit
-========================================================= */
+// =====================================================
+// NORMALIZE GENDER
+// =====================================================
 
-exports.getProducts = async (req, res) => {
+const normalizeGender = (gender) => {
+  if (
+    gender === undefined ||
+    gender === null ||
+    gender === ""
+  ) {
+    return null;
+  }
+
+  return String(gender)
+    .trim()
+    .toLowerCase();
+};
+
+// =====================================================
+// VALIDATE GENDER
+// =====================================================
+
+const validateGender = (gender, storeType) => {
+  // Gender is only required for fashion
+  if (storeType !== "fashion") {
+    return null;
+  }
+
+  const normalizedGender = normalizeGender(gender);
+
+  if (!normalizedGender) {
+    return "Gender is required for fashion products";
+  }
+
+  if (!ALLOWED_GENDERS.includes(normalizedGender)) {
+    return `Invalid gender. Allowed values: ${ALLOWED_GENDERS.join(
+      ", "
+    )}`;
+  }
+
+  return null;
+};
+
+// =====================================================
+// NORMALIZE VARIANT
+// =====================================================
+
+const normalizeVariant = (variant) => {
+  return {
+    sku: String(variant.sku || "").trim(),
+
+    attributes:
+      variant.attributes &&
+      typeof variant.attributes === "object"
+        ? variant.attributes
+        : {},
+
+    // IMPORTANT:
+    // Variant-specific images
+    images: Array.isArray(variant.images)
+      ? variant.images.filter(
+          (image) =>
+            typeof image === "string" &&
+            image.trim()
+        )
+      : [],
+
+    price: Number(variant.price),
+
+    mrp: Number(variant.mrp),
+
+    stock:
+      variant.stock === undefined ||
+      variant.stock === null ||
+      variant.stock === ""
+        ? 0
+        : Number(variant.stock),
+  };
+};
+
+// =====================================================
+// POPULATE PRODUCT
+// =====================================================
+
+const populateProduct = (query) => {
+  return query
+    .populate({
+      path: "categoryId",
+      select: "name slug categoryId parentCategory",
+    })
+    .populate({
+      path: "storeId",
+      select:
+        "storeName storeType phone email address logo banner status",
+    });
+};
+
+// =====================================================
+// VALIDATE VARIANTS
+// =====================================================
+
+const validateVariants = (variants) => {
+  if (!Array.isArray(variants)) {
+    return "Variants must be an array";
+  }
+
+  if (variants.length === 0) {
+    return "At least one variant is required";
+  }
+
+  const skuSet = new Set();
+
+  for (let i = 0; i < variants.length; i++) {
+    const variant = variants[i];
+
+    if (!variant || typeof variant !== "object") {
+      return `Invalid variant at index ${i}`;
+    }
+
+    // =================================================
+    // SKU
+    // =================================================
+
+    if (
+      !variant.sku ||
+      typeof variant.sku !== "string" ||
+      !variant.sku.trim()
+    ) {
+      return `SKU is required for variant ${i + 1}`;
+    }
+
+    const normalizedSku = variant.sku
+      .trim()
+      .toLowerCase();
+
+    if (skuSet.has(normalizedSku)) {
+      return `Duplicate SKU: ${variant.sku}`;
+    }
+
+    skuSet.add(normalizedSku);
+
+    // =================================================
+    // PRICE
+    // =================================================
+
+    const price = Number(variant.price);
+
+    if (Number.isNaN(price) || price < 0) {
+      return `Invalid price for variant ${variant.sku}`;
+    }
+
+    // =================================================
+    // MRP
+    // =================================================
+
+    const mrp = Number(variant.mrp);
+
+    if (Number.isNaN(mrp) || mrp < 0) {
+      return `Invalid MRP for variant ${variant.sku}`;
+    }
+
+    if (price > mrp) {
+      return `Selling price cannot be greater than MRP for ${variant.sku}`;
+    }
+
+    // =================================================
+    // STOCK
+    // =================================================
+
+    const stock =
+      variant.stock === undefined ||
+      variant.stock === null ||
+      variant.stock === ""
+        ? 0
+        : Number(variant.stock);
+
+    if (Number.isNaN(stock) || stock < 0) {
+      return `Invalid stock for variant ${variant.sku}`;
+    }
+
+    // =================================================
+    // ATTRIBUTES
+    // =================================================
+
+    if (
+      variant.attributes !== undefined &&
+      variant.attributes !== null &&
+      typeof variant.attributes !== "object"
+    ) {
+      return `Invalid attributes for variant ${variant.sku}`;
+    }
+
+    // =================================================
+    // IMAGES
+    // =================================================
+
+    if (
+      variant.images !== undefined &&
+      !Array.isArray(variant.images)
+    ) {
+      return `Variant images must be an array for ${variant.sku}`;
+    }
+  }
+
+  return null;
+};
+
+// =====================================================
+// CHECK DUPLICATE SKUS
+// =====================================================
+
+const checkDuplicateSkus = async (
+  variants,
+  excludeProductId = null
+) => {
+  const skus = variants
+    .map((variant) =>
+      String(variant.sku || "")
+        .trim()
+        .toLowerCase()
+    )
+    .filter(Boolean);
+
+  if (!skus.length) {
+    return null;
+  }
+
+  // Get all products having matching variants
+  const query = {
+    isDeleted: false,
+    "variants.sku": {
+      $in: skus,
+    },
+  };
+
+  if (excludeProductId) {
+    query._id = {
+      $ne: excludeProductId,
+    };
+  }
+
+  const products = await Product.find(query).select(
+    "productId variants.sku"
+  );
+
+  for (const product of products) {
+    for (const existingVariant of product.variants) {
+      const existingSku = String(
+        existingVariant.sku || ""
+      )
+        .trim()
+        .toLowerCase();
+
+      if (skus.includes(existingSku)) {
+        return {
+          sku: existingVariant.sku,
+          productId: product.productId,
+        };
+      }
+    }
+  }
+
+  return null;
+};
+
+// =====================================================
+// GET PRODUCTS
+// =====================================================
+
+const getProducts = async (req, res) => {
   try {
     const {
-      category,
       storeId,
-      branchId,
-      productCategory,
+      storeType,
+      category,
+      gender,
       search,
       minPrice,
       maxPrice,
-      sort = "latest",
+      sort = "-createdAt",
       page = 1,
       limit = 20,
     } = req.query;
 
     const filter = {
       isActive: true,
-      isAvailable: true,
+      isDeleted: false,
+      status: "approved",
     };
 
+    // =================================================
     // STORE
+    // =================================================
+
     if (storeId) {
+      if (!isValidObjectId(storeId)) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid storeId",
+        });
+      }
+
       filter.storeId = storeId;
     }
 
-    // BRANCH
-    if (branchId) {
-      filter.branchId = branchId;
+    // =================================================
+    // STORE TYPE
+    // =================================================
+
+    if (storeType) {
+      filter.storeType = storeType
+        .toString()
+        .toLowerCase()
+        .trim();
     }
 
-    // MAIN CATEGORY
+    // =================================================
+    // CATEGORY
+    // =================================================
+
     if (category) {
-      filter.mainCategory = category;
+      if (isValidObjectId(category)) {
+        filter.categoryId = category;
+      }
     }
 
-    // PRODUCT CATEGORY
-    if (productCategory) {
-      filter.productCategory = productCategory;
+    // =================================================
+    // GENDER
+    // =================================================
+
+    if (gender) {
+      const genders = String(gender)
+        .split(",")
+        .map((item) => item.trim().toLowerCase())
+        .filter(Boolean);
+
+      if (genders.length === 1) {
+        if (ALLOWED_GENDERS.includes(genders[0])) {
+          filter.gender = genders[0];
+        }
+      } else if (genders.length > 1) {
+        const validGenders = genders.filter((item) =>
+          ALLOWED_GENDERS.includes(item)
+        );
+
+        if (validGenders.length > 0) {
+          filter.gender = {
+            $in: validGenders,
+          };
+        }
+      }
     }
 
+    // =================================================
     // SEARCH
+    // =================================================
+
     if (search && search.trim()) {
       const searchText = search.trim();
 
@@ -102,13 +414,13 @@ exports.getProducts = async (req, res) => {
           },
         },
         {
-          sku: {
+          shortDescription: {
             $regex: searchText,
             $options: "i",
           },
         },
         {
-          productId: {
+          "variants.sku": {
             $regex: searchText,
             $options: "i",
           },
@@ -116,307 +428,275 @@ exports.getProducts = async (req, res) => {
       ];
     }
 
-    // PRICE
-    if (minPrice !== undefined || maxPrice !== undefined) {
-      filter.price = {};
+    // =================================================
+    // PRICE FILTER
+    // =================================================
 
-      if (
-        minPrice !== undefined &&
-        minPrice !== ""
-      ) {
-        filter.price.$gte = Number(minPrice);
+    if (
+      minPrice !== undefined ||
+      maxPrice !== undefined
+    ) {
+      const priceCondition = {};
+
+      if (minPrice !== undefined) {
+        const min = Number(minPrice);
+
+        if (!Number.isNaN(min)) {
+          priceCondition.$gte = min;
+        }
       }
 
-      if (
-        maxPrice !== undefined &&
-        maxPrice !== ""
-      ) {
-        filter.price.$lte = Number(maxPrice);
+      if (maxPrice !== undefined) {
+        const max = Number(maxPrice);
+
+        if (!Number.isNaN(max)) {
+          priceCondition.$lte = max;
+        }
       }
+
+      filter.variants = {
+        $elemMatch: {
+          price: priceCondition,
+        },
+      };
     }
 
-    // SORT
-    let sortQuery = {
-      createdAt: -1,
-    };
-
-    switch (sort) {
-      case "price-low":
-        sortQuery = {
-          price: 1,
-        };
-        break;
-
-      case "price-high":
-        sortQuery = {
-          price: -1,
-        };
-        break;
-
-      case "rating":
-        sortQuery = {
-          rating: -1,
-        };
-        break;
-
-      case "discount":
-        sortQuery = {
-          discountPrice: -1,
-        };
-        break;
-
-      case "latest":
-      default:
-        sortQuery = {
-          createdAt: -1,
-        };
-        break;
-    }
-
+    // =================================================
     // PAGINATION
-    const currentPage = Math.max(
-      parseInt(page, 10) || 1,
-      1
-    );
+    // =================================================
 
-    const perPage = Math.min(
-      Math.max(
-        parseInt(limit, 10) || 20,
-        1
-      ),
-      100
-    );
-
-    const skip =
-      (currentPage - 1) * perPage;
-
-    // FETCH
-    const products = await Product.find(filter)
-      .populate({
-        path: "mainCategory",
-        select: "_id categoryId name slug",
-      })
-      .populate({
-        path: "productCategory",
-        select: "_id categoryId name slug parentCategory",
-      })
-      .populate({
-        path: "storeId",
-        select:
-          "_id storeName storeType logo status",
-      })
-      .populate({
-        path: "branchId",
-      })
-      .sort(sortQuery)
-      .skip(skip)
-      .limit(perPage)
-      .lean();
-
-    const totalProducts =
-      await Product.countDocuments(filter);
-
-    res.status(200).json({
-      success: true,
-      products,
-      pagination: {
-        currentPage,
-        perPage,
-        totalProducts,
-        totalPages:
-          Math.ceil(
-            totalProducts / perPage
-          ),
-      },
-    });
-  } catch (error) {
-    console.error(
-      "Get Products Error:",
-      error
-    );
-
-    res.status(500).json({
-      success: false,
-      message: error.message,
-    });
-  }
-};
-
-
-/* =========================================================
-   GET STORE PRODUCTS
-   Store Admin API
-
-   IMPORTANT:
-   This returns both active and inactive products.
-
-   Example:
-   GET /api/products/store?storeId=xxxx
-========================================================= */
-
-exports.getStoreProducts = async (req, res) => {
-  try {
-    const {
-      storeId,
-      branchId,
-      search,
-      page = 1,
-      limit = 100,
-    } = req.query;
-
-
-    /* =====================================================
-       STORE ID VALIDATION
-    ===================================================== */
-
-    if (!storeId) {
-      return res.status(400).json({
-        success: false,
-        message: "Store ID is required",
-      });
-    }
-
-    if (!isValidObjectId(storeId)) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid store ID",
-      });
-    }
-
-
-    /* =====================================================
-       FILTER
-    ===================================================== */
-
-    const filter = {
-      storeId,
-    };
-
-
-    /* =====================================================
-       BRANCH
-    ===================================================== */
-
-    if (branchId) {
-      if (!isValidObjectId(branchId)) {
-        return res.status(400).json({
-          success: false,
-          message: "Invalid branch ID",
-        });
-      }
-
-      filter.branchId = branchId;
-    }
-
-
-    /* =====================================================
-       SEARCH
-    ===================================================== */
-
-    if (search && search.trim()) {
-      const searchValue = search.trim();
-
-      filter.$or = [
-        {
-          name: {
-            $regex: searchValue,
-            $options: "i",
-          },
-        },
-        {
-          brand: {
-            $regex: searchValue,
-            $options: "i",
-          },
-        },
-        {
-          sku: {
-            $regex: searchValue,
-            $options: "i",
-          },
-        },
-      ];
-    }
-
-
-    /* =====================================================
-       PAGINATION
-    ===================================================== */
-
-    const currentPage = Math.max(
+    const pageNumber = Math.max(
       Number(page) || 1,
       1
     );
 
-    const perPage = Math.min(
-      Math.max(Number(limit) || 100, 1),
+    const limitNumber = Math.min(
+      Math.max(Number(limit) || 20, 1),
       100
     );
 
     const skip =
-      (currentPage - 1) * perPage;
+      (pageNumber - 1) * limitNumber;
 
+    // =================================================
+    // FETCH PRODUCTS
+    // =================================================
 
-    /* =====================================================
-       FETCH
-    ===================================================== */
-
-    const products = await populateProduct(
-      Product.find(filter)
-        .sort({ createdAt: -1 })
-        .skip(skip)
-        .limit(perPage)
-        .lean()
-    );
-
-
-    /* =====================================================
-       TOTAL
-    ===================================================== */
-
-    const totalProducts =
-      await Product.countDocuments(filter);
-
-
-    /* =====================================================
-       RESPONSE
-    ===================================================== */
+    const [products, total] =
+      await Promise.all([
+        populateProduct(
+          Product.find(filter)
+            .sort(sort)
+            .skip(skip)
+            .limit(limitNumber)
+        ),
+        Product.countDocuments(filter),
+      ]);
 
     return res.status(200).json({
       success: true,
       products,
       pagination: {
-        currentPage,
-        perPage,
-        totalProducts,
+        total,
+        page: pageNumber,
+        limit: limitNumber,
         totalPages: Math.ceil(
-          totalProducts / perPage
+          total / limitNumber
         ),
       },
     });
   } catch (error) {
     console.error(
-      "Get Store Products Error:",
+      "GET PRODUCTS ERROR:",
       error
     );
 
     return res.status(500).json({
       success: false,
-      message: error.message,
+      message: "Failed to fetch products",
+      error: error.message,
     });
   }
 };
 
+// =====================================================
+// GET STORE PRODUCTS
+// =====================================================
 
-/* =========================================================
-   GET SINGLE PRODUCT
-   Customer-facing API
-========================================================= */
+const getStoreProducts = async (req, res) => {
+  try {
+    const { storeId } = req.params;
 
-exports.getProductById = async (req, res) => {
+    if (!isValidObjectId(storeId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid storeId",
+      });
+    }
+
+    const {
+      status,
+      isActive,
+      category,
+      gender,
+      search,
+      page = 1,
+      limit = 20,
+    } = req.query;
+
+    const filter = {
+      storeId,
+      isDeleted: false,
+    };
+
+    // =================================================
+    // STATUS
+    // =================================================
+
+    if (status) {
+      filter.status = status;
+    }
+
+    // =================================================
+    // ACTIVE
+    // =================================================
+
+    if (isActive !== undefined) {
+      filter.isActive =
+        isActive === "true";
+    }
+
+    // =================================================
+    // CATEGORY
+    // =================================================
+
+    if (category) {
+      if (isValidObjectId(category)) {
+        filter.categoryId = category;
+      }
+    }
+
+    // =================================================
+    // GENDER
+    // =================================================
+
+    if (gender) {
+      const genders = String(gender)
+        .split(",")
+        .map((item) => item.trim().toLowerCase())
+        .filter(Boolean);
+
+      if (genders.length === 1) {
+        if (ALLOWED_GENDERS.includes(genders[0])) {
+          filter.gender = genders[0];
+        }
+      } else if (genders.length > 1) {
+        const validGenders = genders.filter((item) =>
+          ALLOWED_GENDERS.includes(item)
+        );
+
+        if (validGenders.length > 0) {
+          filter.gender = {
+            $in: validGenders,
+          };
+        }
+      }
+    }
+
+    // =================================================
+    // SEARCH
+    // =================================================
+
+    if (search && search.trim()) {
+      const searchText = search.trim();
+
+      filter.$or = [
+        {
+          name: {
+            $regex: searchText,
+            $options: "i",
+          },
+        },
+        {
+          brand: {
+            $regex: searchText,
+            $options: "i",
+          },
+        },
+        {
+          "variants.sku": {
+            $regex: searchText,
+            $options: "i",
+          },
+        },
+      ];
+    }
+
+    // =================================================
+    // PAGINATION
+    // =================================================
+
+    const pageNumber = Math.max(
+      Number(page) || 1,
+      1
+    );
+
+    const limitNumber = Math.min(
+      Math.max(Number(limit) || 20, 1),
+      100
+    );
+
+    const skip =
+      (pageNumber - 1) * limitNumber;
+
+    // =================================================
+    // FETCH PRODUCTS
+    // =================================================
+
+    const [products, total] =
+      await Promise.all([
+        populateProduct(
+          Product.find(filter)
+            .sort("-createdAt")
+            .skip(skip)
+            .limit(limitNumber)
+        ),
+        Product.countDocuments(filter),
+      ]);
+
+    return res.status(200).json({
+      success: true,
+      products,
+      pagination: {
+        total,
+        page: pageNumber,
+        limit: limitNumber,
+        totalPages: Math.ceil(
+          total / limitNumber
+        ),
+      },
+    });
+  } catch (error) {
+    console.error(
+      "GET STORE PRODUCTS ERROR:",
+      error
+    );
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch store products",
+      error: error.message,
+    });
+  }
+};
+
+// =====================================================
+// GET SINGLE PRODUCT
+// =====================================================
+
+const getProductById = async (req, res) => {
   try {
     const { id } = req.params;
-
 
     if (!isValidObjectId(id)) {
       return res.status(400).json({
@@ -425,15 +705,14 @@ exports.getProductById = async (req, res) => {
       });
     }
 
-
     const product = await populateProduct(
       Product.findOne({
         _id: id,
         isActive: true,
-        isAvailable: true,
-      }).lean()
+        isDeleted: false,
+        status: "approved",
+      })
     );
-
 
     if (!product) {
       return res.status(404).json({
@@ -442,114 +721,154 @@ exports.getProductById = async (req, res) => {
       });
     }
 
-
     return res.status(200).json({
       success: true,
       product,
     });
   } catch (error) {
     console.error(
-      "Get Product By ID Error:",
+      "GET PRODUCT ERROR:",
       error
     );
 
     return res.status(500).json({
       success: false,
-      message: error.message,
+      message: "Failed to fetch product",
+      error: error.message,
     });
   }
 };
 
+// =====================================================
+// CREATE PRODUCT
+// =====================================================
 
-/* =========================================================
-   CREATE PRODUCT
-========================================================= */
-
-exports.createProduct = async (req, res) => {
+const createProduct = async (req, res) => {
   try {
     const {
       productId,
       storeId,
-      branchId,
-      mainCategory,
-      productCategory,
+      storeType,
+      categoryId,
+      gender,
       name,
-      description,
+      slug,
       brand,
+      description,
+      shortDescription,
       images,
-      price,
-      discountPrice,
-      stock,
+      thumbnail,
+      unitType,
       unit,
-      sku,
-      highlights,
-      attributes,
-      deliveryInfo,
-      returnPolicy,
-      isAvailable,
+      variants,
+      specifications,
+      status,
       isActive,
     } = req.body;
 
-
-    /* =====================================================
-       REQUIRED VALIDATION
-    ===================================================== */
-
-    if (!productId || !productId.trim()) {
-      return res.status(400).json({
-        success: false,
-        message: "Product ID is required",
-      });
-    }
-
+    // =================================================
+    // STORE VALIDATION
+    // =================================================
 
     if (!storeId) {
       return res.status(400).json({
         success: false,
-        message: "Store ID is required",
+        message: "storeId is required",
       });
     }
-
 
     if (!isValidObjectId(storeId)) {
       return res.status(400).json({
         success: false,
-        message: "Invalid store ID",
+        message: "Invalid storeId",
       });
     }
 
+    const store = await Store.findById(storeId);
 
-    if (!mainCategory) {
+    if (!store) {
+      return res.status(404).json({
+        success: false,
+        message: "Store not found",
+      });
+    }
+
+    // =================================================
+    // STORE TYPE
+    // =================================================
+
+    const finalStoreType = String(
+      storeType || store.storeType || ""
+    )
+      .toLowerCase()
+      .trim();
+
+    if (
+      ![
+        "grocery",
+        "fashion",
+        "electronics",
+      ].includes(finalStoreType)
+    ) {
       return res.status(400).json({
         success: false,
-        message: "Main category is required",
+        message: "Invalid storeType",
       });
     }
 
+    // =================================================
+    // GENDER VALIDATION
+    // =================================================
 
-    if (!isValidObjectId(mainCategory)) {
+    const genderError = validateGender(
+      gender,
+      finalStoreType
+    );
+
+    if (genderError) {
       return res.status(400).json({
         success: false,
-        message: "Invalid main category ID",
+        message: genderError,
+        field: "gender",
       });
     }
 
+    const finalGender =
+      finalStoreType === "fashion"
+        ? normalizeGender(gender)
+        : null;
 
-    if (!productCategory) {
+    // =================================================
+    // CATEGORY
+    // =================================================
+
+    if (!categoryId) {
       return res.status(400).json({
         success: false,
-        message: "Product category is required",
+        message: "categoryId is required",
       });
     }
 
-
-    if (!isValidObjectId(productCategory)) {
+    if (!isValidObjectId(categoryId)) {
       return res.status(400).json({
         success: false,
-        message: "Invalid product category ID",
+        message: "Invalid categoryId",
       });
     }
 
+    const category =
+      await Category.findById(categoryId);
+
+    if (!category) {
+      return res.status(404).json({
+        success: false,
+        message: "Category not found",
+      });
+    }
+
+    // =================================================
+    // NAME
+    // =================================================
 
     if (!name || !name.trim()) {
       return res.status(400).json({
@@ -558,204 +877,181 @@ exports.createProduct = async (req, res) => {
       });
     }
 
+    // =================================================
+    // VARIANTS VALIDATION
+    // =================================================
 
-    /* =====================================================
-       PRICE
-    ===================================================== */
+    const variantError =
+      validateVariants(variants);
 
-    const productPrice = Number(price);
-
-    if (
-      price === undefined ||
-      price === null ||
-      price === "" ||
-      Number.isNaN(productPrice) ||
-      productPrice < 0
-    ) {
+    if (variantError) {
       return res.status(400).json({
         success: false,
-        message: "Valid product price is required",
+        message: variantError,
       });
     }
 
+    // =================================================
+    // NORMALIZE VARIANTS
+    // =================================================
 
-    /* =====================================================
-       DISCOUNT PRICE
-    ===================================================== */
+    const normalizedVariants =
+      variants.map(normalizeVariant);
 
-    const finalDiscountPrice =
-      discountPrice !== undefined &&
-      discountPrice !== null &&
-      discountPrice !== ""
-        ? Number(discountPrice)
-        : 0;
+    // =================================================
+    // PRODUCT ID
+    // =================================================
 
+    const finalProductId =
+      productId &&
+      String(productId).trim()
+        ? String(productId).trim()
+        : undefined;
 
-    if (
-      Number.isNaN(finalDiscountPrice) ||
-      finalDiscountPrice < 0
-    ) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid discount price",
-      });
+    if (finalProductId) {
+      const existingProduct =
+        await Product.findOne({
+          productId: finalProductId,
+        });
+
+      if (existingProduct) {
+        return res.status(409).json({
+          success: false,
+          message: `Product ID already exists: ${finalProductId}`,
+          field: "productId",
+          error: "DUPLICATE_PRODUCT_ID",
+        });
+      }
     }
 
+    // =================================================
+    // SLUG
+    // =================================================
 
-    if (
-      finalDiscountPrice > 0 &&
-      finalDiscountPrice >= productPrice
-    ) {
-      return res.status(400).json({
-        success: false,
-        message:
-          "Discount price must be less than product price",
-      });
-    }
+    const finalSlug =
+      slug && slug.trim()
+        ? createSlug(slug)
+        : createSlug(name);
 
-
-    /* =====================================================
-       STOCK
-    ===================================================== */
-
-    const finalStock =
-      stock !== undefined &&
-      stock !== null &&
-      stock !== ""
-        ? Number(stock)
-        : 0;
-
-
-    if (
-      Number.isNaN(finalStock) ||
-      finalStock < 0
-    ) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid stock value",
-      });
-    }
-
-
-    /* =====================================================
-       BRANCH
-    ===================================================== */
-
-    if (
-      branchId &&
-      !isValidObjectId(branchId)
-    ) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid branch ID",
-      });
-    }
-
-
-    /* =====================================================
-       DUPLICATE PRODUCT ID
-    ===================================================== */
-
-    const existingProduct =
+    const existingSlug =
       await Product.findOne({
-        productId: productId.trim(),
+        slug: finalSlug,
       });
 
-
-    if (existingProduct) {
+    if (existingSlug) {
       return res.status(409).json({
         success: false,
-        message: "Product ID already exists",
+        message: `Product slug already exists: ${finalSlug}`,
+        field: "slug",
+        error: "DUPLICATE_SLUG",
       });
     }
 
+    // =================================================
+    // DUPLICATE SKU CHECK
+    // =================================================
 
-    /* =====================================================
-       CREATE PRODUCT
-    ===================================================== */
+    const duplicateSku =
+      await checkDuplicateSkus(
+        normalizedVariants
+      );
+
+    if (duplicateSku) {
+      return res.status(409).json({
+        success: false,
+        message: `SKU already exists: ${duplicateSku.sku}`,
+        sku: duplicateSku.sku,
+        productId:
+          duplicateSku.productId,
+        field: "variants.sku",
+        error: "DUPLICATE_SKU",
+      });
+    }
+
+    // =================================================
+    // CREATE PRODUCT
+    // =================================================
 
     const product =
       await Product.create({
-        productId: productId.trim(),
+        productId:
+          finalProductId,
 
         storeId,
 
-        branchId:
-          branchId || null,
+        storeType:
+          finalStoreType,
 
-        mainCategory,
+        categoryId,
 
-        productCategory,
+        // =================================================
+        // GENDER
+        // =================================================
+
+        gender: finalGender,
 
         name: name.trim(),
 
-        description:
-          description || "",
+        slug: finalSlug,
 
         brand:
-          brand || "",
+          brand?.trim() || "",
+
+        description:
+          description?.trim() || "",
+
+        shortDescription:
+          shortDescription?.trim() || "",
 
         images:
           Array.isArray(images)
-            ? images
+            ? images.filter(Boolean)
             : [],
 
-        price: productPrice,
+        thumbnail:
+          thumbnail ||
+          (
+            Array.isArray(images)
+              ? images[0]
+              : ""
+          ) ||
+          "",
 
-        discountPrice:
-          finalDiscountPrice,
-
-        stock:
-          finalStock,
+        unitType:
+          unitType || "count",
 
         unit:
           unit || "piece",
 
-        sku:
-          sku || "",
+        // =================================================
+        // VARIANTS WITH IMAGES
+        // =================================================
 
-        highlights:
-          Array.isArray(highlights)
-            ? highlights
-            : [],
+        variants:
+          normalizedVariants,
 
-        attributes:
-          attributes &&
-          typeof attributes === "object"
-            ? attributes
-            : {},
+        specifications:
+          specifications || {},
 
-        deliveryInfo:
-          deliveryInfo ||
-          "Free Delivery",
-
-        returnPolicy:
-          returnPolicy ||
-          "7 Days Replacement",
-
-        isAvailable:
-          isAvailable !== undefined
-            ? Boolean(isAvailable)
-            : true,
+        status:
+          status || "pending",
 
         isActive:
           isActive !== undefined
             ? Boolean(isActive)
             : true,
+
+        isDeleted: false,
       });
 
-
-    /* =====================================================
-       POPULATED RESPONSE
-    ===================================================== */
+    // =================================================
+    // POPULATE
+    // =================================================
 
     const populatedProduct =
       await populateProduct(
-        Product.findById(
-          product._id
-        )
+        Product.findById(product._id)
       );
-
 
     return res.status(201).json({
       success: true,
@@ -765,36 +1061,76 @@ exports.createProduct = async (req, res) => {
     });
   } catch (error) {
     console.error(
-      "Create Product Error:",
-      error
+      "================================================="
     );
 
-    return res.status(400).json({
+    console.error(
+      "CREATE PRODUCT ERROR"
+    );
+
+    console.error(
+      "MESSAGE:",
+      error.message
+    );
+
+    console.error(
+      "CODE:",
+      error.code
+    );
+
+    console.error(
+      "KEY PATTERN:",
+      error.keyPattern
+    );
+
+    console.error(
+      "KEY VALUE:",
+      error.keyValue
+    );
+
+    console.error(
+      "================================================="
+    );
+
+    // =================================================
+    // MONGODB DUPLICATE KEY
+    // =================================================
+
+    if (error.code === 11000) {
+      const duplicateField =
+        Object.keys(
+          error.keyPattern || {}
+        )[0];
+
+      return res.status(409).json({
+        success: false,
+        message: `Duplicate value already exists for ${
+          duplicateField || "unique field"
+        }`,
+        field:
+          duplicateField || null,
+        value:
+          error.keyValue || null,
+        error: "DUPLICATE_KEY",
+      });
+    }
+
+    return res.status(500).json({
       success: false,
-      message: error.message,
+      message:
+        "Failed to create product",
+      error: error.message,
     });
   }
 };
 
+// =====================================================
+// UPDATE PRODUCT
+// =====================================================
 
-/* =========================================================
-   UPDATE PRODUCT
-   Store Admin
-
-   Requires:
-   - URL product ID
-   - storeId in body
-========================================================= */
-
-exports.updateProduct = async (req, res) => {
+const updateProduct = async (req, res) => {
   try {
     const { id } = req.params;
-    const { storeId } = req.body;
-
-
-    /* =====================================================
-       PRODUCT ID
-    ===================================================== */
 
     if (!isValidObjectId(id)) {
       return res.status(400).json({
@@ -803,277 +1139,424 @@ exports.updateProduct = async (req, res) => {
       });
     }
 
-
-    /* =====================================================
-       STORE ID
-    ===================================================== */
-
-    if (!storeId) {
-      return res.status(400).json({
-        success: false,
-        message: "Store ID is required",
-      });
-    }
-
-
-    if (!isValidObjectId(storeId)) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid store ID",
-      });
-    }
-
-
-    /* =====================================================
-       FIND PRODUCT FOR THIS STORE
-    ===================================================== */
-
     const product =
-      await Product.findOne({
-        _id: id,
-        storeId,
-      });
-
+      await Product.findById(id);
 
     if (!product) {
       return res.status(404).json({
         success: false,
-        message:
-          "Product not found for this store",
+        message: "Product not found",
       });
     }
 
+    const {
+      categoryId,
+      gender,
+      name,
+      slug,
+      brand,
+      description,
+      shortDescription,
+      images,
+      thumbnail,
+      unitType,
+      unit,
+      variants,
+      specifications,
+      isActive,
+      status,
+    } = req.body;
 
-    /* =====================================================
-       ALLOWED FIELDS
-    ===================================================== */
+    // =================================================
+    // CATEGORY
+    // =================================================
 
-    const allowedFields = [
-      "branchId",
-      "mainCategory",
-      "productCategory",
-      "name",
-      "description",
-      "brand",
-      "images",
-      "price",
-      "discountPrice",
-      "stock",
-      "unit",
-      "sku",
-      "highlights",
-      "attributes",
-      "deliveryInfo",
-      "returnPolicy",
-      "isAvailable",
-      "isActive",
-    ];
-
-
-    allowedFields.forEach((field) => {
-      if (
-        req.body[field] !== undefined
-      ) {
-        product[field] =
-          req.body[field];
+    if (categoryId !== undefined) {
+      if (!isValidObjectId(categoryId)) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid categoryId",
+        });
       }
-    });
 
+      const category =
+        await Category.findById(
+          categoryId
+        );
 
-    /* =====================================================
-       VALIDATE NAME
-    ===================================================== */
+      if (!category) {
+        return res.status(404).json({
+          success: false,
+          message: "Category not found",
+        });
+      }
 
-    if (
-      !product.name ||
-      !product.name.trim()
-    ) {
-      return res.status(400).json({
-        success: false,
-        message: "Product name is required",
-      });
+      product.categoryId =
+        categoryId;
     }
 
+    // =================================================
+    // GENDER
+    // =================================================
 
-    product.name =
-      product.name.trim();
+    if (gender !== undefined) {
+      const normalizedGender =
+        normalizeGender(gender);
 
+      // Fashion product
+      if (product.storeType === "fashion") {
+        const genderError =
+          validateGender(
+            normalizedGender,
+            product.storeType
+          );
 
-    /* =====================================================
-       VALIDATE PRICE
-    ===================================================== */
+        if (genderError) {
+          return res.status(400).json({
+            success: false,
+            message: genderError,
+            field: "gender",
+          });
+        }
 
-    product.price =
-      Number(product.price);
-
-
-    if (
-      Number.isNaN(product.price) ||
-      product.price < 0
-    ) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid product price",
-      });
+        product.gender =
+          normalizedGender;
+      } else {
+        // Non-fashion product
+        product.gender = null;
+      }
     }
 
-
-    /* =====================================================
-       DISCOUNT PRICE
-    ===================================================== */
-
-    product.discountPrice =
-      Number(product.discountPrice) || 0;
-
+    // =================================================
+    // IMPORTANT
+    // If existing fashion product has no gender
+    // and gender is not sent during update,
+    // don't silently save invalid gender.
+    // =================================================
 
     if (
-      product.discountPrice < 0
-    ) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid discount price",
-      });
-    }
-
-
-    if (
-      product.discountPrice > 0 &&
-      product.discountPrice >= product.price
-    ) {
-      return res.status(400).json({
-        success: false,
-        message:
-          "Discount price must be less than product price",
-      });
-    }
-
-
-    /* =====================================================
-       STOCK
-    ===================================================== */
-
-    product.stock =
-      Number(product.stock) || 0;
-
-
-    if (product.stock < 0) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid stock value",
-      });
-    }
-
-
-    /* =====================================================
-       CATEGORY VALIDATION
-    ===================================================== */
-
-    if (
-      product.mainCategory &&
-      !isValidObjectId(
-        product.mainCategory
+      product.storeType === "fashion" &&
+      gender === undefined &&
+      !ALLOWED_GENDERS.includes(
+        normalizeGender(product.gender)
       )
     ) {
       return res.status(400).json({
         success: false,
         message:
-          "Invalid main category ID",
+          "Gender is required for fashion products",
+        field: "gender",
       });
     }
 
+    // =================================================
+    // NAME
+    // =================================================
+
+    if (name !== undefined) {
+      if (
+        typeof name !== "string" ||
+        !name.trim()
+      ) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "Product name cannot be empty",
+        });
+      }
+
+      product.name =
+        name.trim();
+    }
+
+    // =================================================
+    // SLUG
+    // =================================================
+
+    if (slug !== undefined) {
+      const finalSlug =
+        createSlug(slug);
+
+      if (!finalSlug) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "Product slug cannot be empty",
+        });
+      }
+
+      const existingSlug =
+        await Product.findOne({
+          slug: finalSlug,
+          _id: {
+            $ne: id,
+          },
+        });
+
+      if (existingSlug) {
+        return res.status(409).json({
+          success: false,
+          message: `Product slug already exists: ${finalSlug}`,
+          field: "slug",
+          error: "DUPLICATE_SLUG",
+        });
+      }
+
+      product.slug =
+        finalSlug;
+    }
+
+    // =================================================
+    // BASIC FIELDS
+    // =================================================
+
+    if (brand !== undefined) {
+      product.brand =
+        brand?.trim() || "";
+    }
+
+    if (description !== undefined) {
+      product.description =
+        description?.trim() || "";
+    }
 
     if (
-      product.productCategory &&
-      !isValidObjectId(
-        product.productCategory
-      )
+      shortDescription !== undefined
     ) {
-      return res.status(400).json({
-        success: false,
-        message:
-          "Invalid product category ID",
-      });
+      product.shortDescription =
+        shortDescription?.trim() || "";
     }
 
+    if (images !== undefined) {
+      product.images =
+        Array.isArray(images)
+          ? images.filter(Boolean)
+          : [];
+    }
 
-    /* =====================================================
-       BRANCH VALIDATION
-    ===================================================== */
+    if (thumbnail !== undefined) {
+      product.thumbnail =
+        thumbnail || "";
+    }
+
+    if (unitType !== undefined) {
+      product.unitType =
+        unitType;
+    }
+
+    if (unit !== undefined) {
+      product.unit =
+        unit;
+    }
+
+    // =================================================
+    // VARIANTS
+    // =================================================
+
+    if (variants !== undefined) {
+      const variantError =
+        validateVariants(variants);
+
+      if (variantError) {
+        return res.status(400).json({
+          success: false,
+          message: variantError,
+        });
+      }
+
+      const normalizedVariants =
+        variants.map(
+          normalizeVariant
+        );
+
+      // =================================================
+      // DUPLICATE SKU CHECK
+      // Exclude current product
+      // =================================================
+
+      const duplicateSku =
+        await checkDuplicateSkus(
+          normalizedVariants,
+          id
+        );
+
+      if (duplicateSku) {
+        return res.status(409).json({
+          success: false,
+          message: `SKU already exists: ${duplicateSku.sku}`,
+          sku: duplicateSku.sku,
+          productId:
+            duplicateSku.productId,
+          field: "variants.sku",
+          error: "DUPLICATE_SKU",
+        });
+      }
+
+      // =================================================
+      // PRESERVE EXISTING VARIANT IDs
+      // =================================================
+
+      product.variants =
+        normalizedVariants.map(
+          (variant, index) => ({
+            _id:
+              variants[index]?._id &&
+              isValidObjectId(
+                variants[index]._id
+              )
+                ? variants[index]._id
+                : new mongoose.Types.ObjectId(),
+
+            sku:
+              variant.sku,
+
+            attributes:
+              variant.attributes,
+
+            // IMPORTANT
+            // Variant-specific images
+            images:
+              variant.images,
+
+            price:
+              variant.price,
+
+            mrp:
+              variant.mrp,
+
+            stock:
+              variant.stock,
+          })
+        );
+    }
+
+    // =================================================
+    // SPECIFICATIONS
+    // =================================================
 
     if (
-      product.branchId &&
-      !isValidObjectId(
-        product.branchId
-      )
+      specifications !== undefined
     ) {
-      return res.status(400).json({
-        success: false,
-        message:
-          "Invalid branch ID",
-      });
+      product.specifications =
+        specifications || {};
     }
 
+    // =================================================
+    // ACTIVE
+    // =================================================
 
-    /* =====================================================
-       SAVE
-    ===================================================== */
+    if (isActive !== undefined) {
+      product.isActive =
+        Boolean(isActive);
+    }
+
+    // =================================================
+    // STATUS
+    // =================================================
+
+    if (status !== undefined) {
+      product.status =
+        status;
+    }
+
+    // =================================================
+    // SAVE
+    // =================================================
 
     await product.save();
 
+    // =================================================
+    // POPULATE
+    // =================================================
 
-    /* =====================================================
-       POPULATED RESPONSE
-    ===================================================== */
-
-    const updatedProduct =
+    const populatedProduct =
       await populateProduct(
         Product.findById(
           product._id
         )
       );
 
-
     return res.status(200).json({
       success: true,
       message:
         "Product updated successfully",
-      product: updatedProduct,
+      product: populatedProduct,
     });
   } catch (error) {
     console.error(
-      "Update Product Error:",
-      error
+      "================================================="
     );
 
-    return res.status(400).json({
+    console.error(
+      "UPDATE PRODUCT ERROR"
+    );
+
+    console.error(
+      "MESSAGE:",
+      error.message
+    );
+
+    console.error(
+      "CODE:",
+      error.code
+    );
+
+    console.error(
+      "KEY PATTERN:",
+      error.keyPattern
+    );
+
+    console.error(
+      "KEY VALUE:",
+      error.keyValue
+    );
+
+    console.error(
+      "================================================="
+    );
+
+    // =================================================
+    // DUPLICATE KEY
+    // =================================================
+
+    if (error.code === 11000) {
+      const duplicateField =
+        Object.keys(
+          error.keyPattern || {}
+        )[0];
+
+      return res.status(409).json({
+        success: false,
+        message: `Duplicate value already exists for ${
+          duplicateField || "unique field"
+        }`,
+        field:
+          duplicateField || null,
+        value:
+          error.keyValue || null,
+        error: "DUPLICATE_KEY",
+      });
+    }
+
+    return res.status(500).json({
       success: false,
-      message: error.message,
+      message:
+        "Failed to update product",
+      error: error.message,
     });
   }
 };
 
+// =====================================================
+// DELETE PRODUCT
+// =====================================================
 
-/* =========================================================
-   DELETE PRODUCT
-   Soft Delete
-
-   Requires:
-   - URL product ID
-   - storeId query parameter
-
-   Example:
-   DELETE /api/products/:id?storeId=xxxx
-========================================================= */
-
-exports.deleteProduct = async (req, res) => {
+const deleteProduct = async (
+  req,
+  res
+) => {
   try {
     const { id } = req.params;
-    const { storeId } = req.query;
-
-
-    /* =====================================================
-       PRODUCT ID
-    ===================================================== */
 
     if (!isValidObjectId(id)) {
       return res.status(400).json({
@@ -1082,58 +1565,20 @@ exports.deleteProduct = async (req, res) => {
       });
     }
 
-
-    /* =====================================================
-       STORE ID
-    ===================================================== */
-
-    if (!storeId) {
-      return res.status(400).json({
-        success: false,
-        message: "Store ID is required",
-      });
-    }
-
-
-    if (!isValidObjectId(storeId)) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid store ID",
-      });
-    }
-
-
-    /* =====================================================
-       FIND PRODUCT
-    ===================================================== */
-
     const product =
-      await Product.findOne({
-        _id: id,
-        storeId,
-      });
-
+      await Product.findById(id);
 
     if (!product) {
       return res.status(404).json({
         success: false,
-        message:
-          "Product not found for this store",
+        message: "Product not found",
       });
     }
 
-
-    /* =====================================================
-       SOFT DELETE
-    ===================================================== */
-
+    product.isDeleted = true;
     product.isActive = false;
 
-    product.isAvailable = false;
-
-
     await product.save();
-
 
     return res.status(200).json({
       success: true,
@@ -1142,28 +1587,29 @@ exports.deleteProduct = async (req, res) => {
     });
   } catch (error) {
     console.error(
-      "Delete Product Error:",
+      "DELETE PRODUCT ERROR:",
       error
     );
 
     return res.status(500).json({
       success: false,
-      message: error.message,
+      message:
+        "Failed to delete product",
+      error: error.message,
     });
   }
 };
 
+// =====================================================
+// RESTORE PRODUCT
+// =====================================================
 
-/* =========================================================
-   RESTORE PRODUCT
-   Optional but useful for Store Admin
-========================================================= */
-
-exports.restoreProduct = async (req, res) => {
+const restoreProduct = async (
+  req,
+  res
+) => {
   try {
     const { id } = req.params;
-    const { storeId } = req.body;
-
 
     if (!isValidObjectId(id)) {
       return res.status(400).json({
@@ -1172,61 +1618,51 @@ exports.restoreProduct = async (req, res) => {
       });
     }
 
-
-    if (!storeId) {
-      return res.status(400).json({
-        success: false,
-        message: "Store ID is required",
-      });
-    }
-
-
-    if (!isValidObjectId(storeId)) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid store ID",
-      });
-    }
-
-
     const product =
-      await Product.findOne({
-        _id: id,
-        storeId,
-      });
-
+      await Product.findById(id);
 
     if (!product) {
       return res.status(404).json({
         success: false,
-        message:
-          "Product not found for this store",
+        message: "Product not found",
       });
     }
 
-
+    product.isDeleted = false;
     product.isActive = true;
-    product.isAvailable = true;
-
 
     await product.save();
-
 
     return res.status(200).json({
       success: true,
       message:
         "Product restored successfully",
-      product,
     });
   } catch (error) {
     console.error(
-      "Restore Product Error:",
+      "RESTORE PRODUCT ERROR:",
       error
     );
 
     return res.status(500).json({
       success: false,
-      message: error.message,
+      message:
+        "Failed to restore product",
+      error: error.message,
     });
   }
+};
+
+// =====================================================
+// EXPORTS
+// =====================================================
+
+module.exports = {
+  getProducts,
+  getStoreProducts,
+  getProductById,
+  createProduct,
+  updateProduct,
+  deleteProduct,
+  restoreProduct,
 };

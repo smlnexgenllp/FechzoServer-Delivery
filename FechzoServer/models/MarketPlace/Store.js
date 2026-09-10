@@ -23,8 +23,9 @@ const storeSchema = new mongoose.Schema(
 
     storeType: {
       type: String,
-      enum: ["grocery", "fashion", "electronic"],
+      enum: ["grocery", "fashion", "electronics"],
       required: true,
+      index: true,
     },
 
     description: {
@@ -68,23 +69,26 @@ const storeSchema = new mongoose.Schema(
     },
 
     // =========================
-    // OWNER / POC DETAILS
+    // OWNER / POC
     // =========================
     ownerDetails: {
       name: {
         type: String,
         trim: true,
+        default: "",
       },
 
       phone: {
         type: String,
         trim: true,
+        default: "",
       },
 
       email: {
         type: String,
         lowercase: true,
         trim: true,
+        default: "",
       },
 
       designation: {
@@ -271,7 +275,7 @@ const storeSchema = new mongoose.Schema(
     },
 
     // =========================
-    // STATUS / ADMIN CONTROL
+    // STATUS
     // =========================
     status: {
       type: String,
@@ -337,7 +341,7 @@ const storeSchema = new mongoose.Schema(
     ],
 
     // =========================
-    // DELIVERY SETTINGS
+    // DELIVERY
     // =========================
     deliveryRadius: {
       type: Number,
@@ -367,7 +371,7 @@ const storeSchema = new mongoose.Schema(
     allowedCategories: [
       {
         type: mongoose.Schema.Types.ObjectId,
-        ref: "Category",
+        ref: "MarketplaceCategory",
       },
     ],
 
@@ -385,33 +389,28 @@ const storeSchema = new mongoose.Schema(
   }
 );
 
-// =====================================================
+// =========================
 // INDEXES
-// =====================================================
+// =========================
 
-// Location search
 storeSchema.index({
   "address.coordinates": "2dsphere",
 });
 
-// Store type + status
 storeSchema.index({
   storeType: 1,
   status: 1,
 });
 
-// Owner stores
 storeSchema.index({
   owner: 1,
 });
 
-// Status + deleted
 storeSchema.index({
   status: 1,
   isDeleted: 1,
 });
 
-// Contact search
 storeSchema.index({
   email: 1,
 });
@@ -420,17 +419,14 @@ storeSchema.index({
   phone: 1,
 });
 
-// Store login username
 storeSchema.index({
   "loginCredentials.username": 1,
 });
 
-// =====================================================
+// =========================
 // MODEL
-// =====================================================
+// =========================
 
-// IMPORTANT:
-// Prevent OverwriteModelError
 module.exports =
   mongoose.models.Store ||
   mongoose.model("Store", storeSchema, "stores");

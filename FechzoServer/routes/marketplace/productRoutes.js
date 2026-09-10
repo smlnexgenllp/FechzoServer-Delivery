@@ -4,50 +4,82 @@ const router = express.Router();
 
 const {
   getProducts,
+  getStoreProducts,
   getProductById,
   createProduct,
   updateProduct,
   deleteProduct,
+  restoreProduct,
 } = require("../../controllers/marketplace/productController");
 
-/*
-=========================================================
-GET ALL PRODUCTS
-GET /api/products
-=========================================================
-*/
-router.get("/", getProducts);
+// =====================================================
+// GET STORE PRODUCTS
+// IMPORTANT: Before /:id
+// =====================================================
 
-/*
-=========================================================
-GET SINGLE PRODUCT
-GET /api/products/:id
-=========================================================
-*/
-router.get("/:id", getProductById);
+router.get(
+  "/store",
+  getStoreProducts
+);
 
-/*
-=========================================================
-CREATE PRODUCT
-POST /api/products
-=========================================================
-*/
-router.post("/", createProduct);
+// =====================================================
+// GET ALL PRODUCTS
+// GET /api/products
+// =====================================================
 
-/*
-=========================================================
-UPDATE PRODUCT
-PUT /api/products/:id
-=========================================================
-*/
-router.put("/:id", updateProduct);
+router.get(
+  "/",
+  getProducts
+);
 
-/*
-=========================================================
-DELETE PRODUCT
-DELETE /api/products/:id
-=========================================================
-*/
-router.delete("/:id", deleteProduct);
+// =====================================================
+// CREATE PRODUCT
+// POST /api/products
+// =====================================================
+
+router.post(
+  "/",
+  createProduct
+);
+
+// =====================================================
+// UPDATE PRODUCT
+// PUT /api/products/:id
+// =====================================================
+
+router.put(
+  "/:id",
+  updateProduct
+);
+
+// =====================================================
+// DELETE PRODUCT
+// DELETE /api/products/:id
+// =====================================================
+
+router.delete(
+  "/:id",
+  deleteProduct
+);
+
+// =====================================================
+// RESTORE PRODUCT
+// PATCH /api/products/:id/restore
+// =====================================================
+
+router.patch(
+  "/:id/restore",
+  restoreProduct
+);
+
+// =====================================================
+// GET SINGLE PRODUCT
+// IMPORTANT: Keep this AFTER /store
+// =====================================================
+
+router.get(
+  "/:id",
+  getProductById
+);
 
 module.exports = router;

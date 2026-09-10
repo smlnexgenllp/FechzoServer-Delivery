@@ -1,20 +1,88 @@
 const mongoose = require("mongoose");
 
-const productSchema = new mongoose.Schema(
+// =====================================================
+// VARIANT SCHEMA
+// =====================================================
+const variantSchema = new mongoose.Schema(
   {
-    // ======================
-    // PRODUCT ID
-    // ======================
-    productId: {
+    // =========================
+    // SKU
+    // =========================
+    sku: {
       type: String,
       required: true,
-      unique: true,
       trim: true,
     },
 
-    // ======================
+    // =========================
+    // ATTRIBUTES
+    // Example:
+    // { color: "Black", size: "M" }
+    // =========================
+    attributes: {
+      type: mongoose.Schema.Types.Mixed,
+      default: {},
+    },
+
+    // =========================
+    // VARIANT IMAGES
+    // Images belonging to this color/variant
+    // =========================
+    images: {
+      type: [String],
+      default: [],
+    },
+
+    // =========================
+    // SELLING PRICE
+    // =========================
+    price: {
+      type: Number,
+      required: true,
+      min: 0,
+    },
+
+    // =========================
+    // MRP
+    // =========================
+    mrp: {
+      type: Number,
+      required: true,
+      min: 0,
+    },
+
+    // =========================
+    // STOCK
+    // =========================
+    stock: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+  },
+  {
+    _id: true,
+  }
+);
+
+// =====================================================
+// PRODUCT SCHEMA
+// =====================================================
+const productSchema = new mongoose.Schema(
+  {
+    // =========================
+    // PRODUCT ID
+    // =========================
+    productId: {
+      type: String,
+      unique: true,
+      sparse: true,
+      trim: true,
+    },
+
+    // =========================
     // STORE
-    // ======================
+    // =========================
     storeId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Store",
@@ -22,49 +90,42 @@ const productSchema = new mongoose.Schema(
       index: true,
     },
 
-    // ======================
-    // BRANCH
-    // ======================
-    branchId: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "Branch",
-      default: null,
-      index: true,
-    },
-
-    // ======================
-    // MAIN CATEGORY
-    // ======================
-    mainCategory: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "Category",
+    storeType: {
+      type: String,
+      enum: [
+        "grocery",
+        "fashion",
+        "electronics",
+      ],
       required: true,
       index: true,
     },
 
-    // ======================
-    // PRODUCT CATEGORY
-    // ======================
-    productCategory: {
+    // =========================
+    // CATEGORY
+    // =========================
+    categoryId: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: "Category",
+      ref: "MarketplaceCategory",
       required: true,
       index: true,
     },
-
-    // ======================
+    
+    // =========================
     // BASIC DETAILS
-    // ======================
+    // =========================
     name: {
       type: String,
       required: true,
       trim: true,
     },
 
-    description: {
+    slug: {
       type: String,
-      default: "",
+      required: true,
       trim: true,
+      lowercase: true,
+      index: true,
     },
 
     brand: {
@@ -72,37 +133,61 @@ const productSchema = new mongoose.Schema(
       default: "",
       trim: true,
     },
+// =====================================================
+// GENDER
+// =====================================================
+    gender: {
+      type: String,
+      enum: [
+        "men",
+        "women",
+        "boys",
+        "girls",
+        "baby-kids",
+        "unisex",
+      ],
+      default: null,
+      index: true,
+    },
+    description: {
+      type: String,
+      default: "",
+      trim: true,
+    },
 
-    // ======================
-    // PRODUCT IMAGES
-    // ======================
+    shortDescription: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+
+    // =========================
+    // DEFAULT PRODUCT IMAGES
+    // =========================
     images: {
       type: [String],
       default: [],
     },
 
-    // ======================
-    // PRICE
-    // ======================
-    price: {
-      type: Number,
-      required: true,
-      min: 0,
+    thumbnail: {
+      type: String,
+      default: "",
     },
 
-    discountPrice: {
-      type: Number,
-      default: 0,
-      min: 0,
-    },
-
-    // ======================
-    // INVENTORY
-    // ======================
-    stock: {
-      type: Number,
-      default: 0,
-      min: 0,
+    // =========================
+    // UNIT
+    // =========================
+    unitType: {
+      type: String,
+      enum: [
+        "weight",
+        "volume",
+        "count",
+        "length",
+        "size",
+        "other",
+      ],
+      default: "count",
     },
 
     unit: {
@@ -111,31 +196,55 @@ const productSchema = new mongoose.Schema(
       trim: true,
     },
 
-    sku: {
-      type: String,
-      default: "",
-      trim: true,
-    },
-
-    // ======================
-    // FLIPKART-STYLE HIGHLIGHTS
-    // ======================
-    highlights: {
-      type: [String],
+    // =========================
+    // VARIANTS
+    // =========================
+    variants: {
+      type: [variantSchema],
       default: [],
     },
 
-    // ======================
-    // DYNAMIC ATTRIBUTES
-    // ======================
-    attributes: {
+    // =========================
+    // SPECIFICATIONS
+    // =========================
+    specifications: {
       type: mongoose.Schema.Types.Mixed,
       default: {},
     },
 
-    // ======================
-    // RATINGS
-    // ======================
+    // =========================
+    // STATUS
+    // =========================
+    status: {
+      type: String,
+      enum: [
+        "pending",
+        "approved",
+        "rejected",
+        "suspended",
+      ],
+      default: "pending",
+      index: true,
+    },
+
+    // =========================
+    // ACTIVE / DELETE
+    // =========================
+    isActive: {
+      type: Boolean,
+      default: true,
+      index: true,
+    },
+
+    isDeleted: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+
+    // =========================
+    // RATING
+    // =========================
     rating: {
       type: Number,
       default: 0,
@@ -148,75 +257,47 @@ const productSchema = new mongoose.Schema(
       default: 0,
       min: 0,
     },
-
-    // ======================
-    // DELIVERY
-    // ======================
-    deliveryInfo: {
-      type: String,
-      default: "Free Delivery",
-      trim: true,
-    },
-
-    // ======================
-    // RETURN POLICY
-    // ======================
-    returnPolicy: {
-      type: String,
-      default: "7 Days Replacement",
-      trim: true,
-    },
-
-    // ======================
-    // AVAILABILITY
-    // ======================
-    isAvailable: {
-      type: Boolean,
-      default: true,
-    },
-
-    // ======================
-    // ACTIVE STATUS
-    // ======================
-    isActive: {
-      type: Boolean,
-      default: true,
-    },
   },
   {
     timestamps: true,
   }
 );
 
-// ======================
+// =====================================================
 // INDEXES
-// ======================
+// =====================================================
 
 productSchema.index({
   storeId: 1,
-  branchId: 1,
+  storeType: 1,
+  gender: 1,
 });
 
 productSchema.index({
-  mainCategory: 1,
-  productCategory: 1,
+  categoryId: 1,
+});
+
+productSchema.index({
+  storeId: 1,
+  categoryId: 1,
 });
 
 productSchema.index({
   storeId: 1,
   isActive: 1,
-  isAvailable: 1,
+  isDeleted: 1,
 });
 
 productSchema.index({
   name: "text",
-  description: "text",
   brand: "text",
+  description: "text",
+  shortDescription: "text",
 });
 
-// ======================
+// =====================================================
 // MODEL
-// ======================
+// =====================================================
 
 module.exports =
   mongoose.models.Product ||

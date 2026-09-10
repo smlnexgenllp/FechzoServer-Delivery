@@ -5,72 +5,140 @@ const branchSchema = new mongoose.Schema(
     branchId: {
       type: String,
       required: true,
-      unique: true
+      unique: true,
+      trim: true,
     },
 
     storeId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Store",
-      required: true
+      required: true,
+      index: true,
     },
 
     branchName: {
       type: String,
-      required: true
+      required: true,
+      trim: true,
     },
 
     address: {
-      shopNumber: String,
-      area: String,
-      city: String,
-      state: String,
-      postalCode: String,
-      landmark: String,
-      latitude: String,
-      longitude: String,
-      mapLink: String
+      shopNumber: {
+        type: String,
+        default: "",
+      },
+
+      area: {
+        type: String,
+        default: "",
+      },
+
+      city: {
+        type: String,
+        default: "",
+      },
+
+      state: {
+        type: String,
+        default: "",
+      },
+
+      postalCode: {
+        type: String,
+        default: "",
+      },
+
+      landmark: {
+        type: String,
+        default: "",
+      },
+
+      latitude: {
+        type: String,
+        default: "",
+      },
+
+      longitude: {
+        type: String,
+        default: "",
+      },
+
+      mapLink: {
+        type: String,
+        default: "",
+      },
     },
 
-    phone: String,
+    phone: {
+      type: String,
+      default: "",
+    },
 
     images: {
-      profile: String,
-      cover: String,
+      profile: {
+        type: String,
+        default: "",
+      },
+
+      cover: {
+        type: String,
+        default: "",
+      },
+
       gallery: {
         type: [String],
-        default: []
-      }
+        default: [],
+      },
     },
 
     timings: {
-      openTime: String,
-      closeTime: String,
+      openTime: {
+        type: String,
+        default: "",
+      },
+
+      closeTime: {
+        type: String,
+        default: "",
+      },
+
       days: {
         type: [String],
-        default: []
-      }
+        default: [],
+      },
     },
 
     approvalStatus: {
       type: String,
-      enum: ["Pending", "Approved", "Rejected"],
-      default: "Pending"
+      enum: [
+        "pending",
+        "approved",
+        "rejected",
+      ],
+      default: "pending",
+      index: true,
     },
 
-    rejectionReason: String,
+    rejectionReason: {
+      type: String,
+      default: "",
+    },
 
     isActive: {
       type: Boolean,
-      default: true
-    }
+      default: true,
+    },
   },
   {
-    timestamps: true
+    timestamps: true,
   }
 );
 
-module.exports = mongoose.model(
-  "Branch",
-  branchSchema,
-  "branches"
-);
+branchSchema.index({
+  storeId: 1,
+  isActive: 1,
+});
+
+module.exports =
+  mongoose.models.Branch ||
+  mongoose.model("Branch", branchSchema, "branches");

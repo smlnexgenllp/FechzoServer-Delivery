@@ -1,4 +1,4 @@
-const Category = require("../../models/MarketPlace/Category");
+const Category = require("../../models/MarketPlace/MarketplaceCategory");
 
 // =====================================================
 // GET MAIN CATEGORIES
@@ -15,14 +15,15 @@ exports.getCategories = async (req, res) => {
       name: 1,
     });
 
-    res.status(200).json({
+    return res.status(200).json({
       success: true,
+      count: categories.length,
       categories,
     });
   } catch (error) {
     console.error("Get categories error:", error);
 
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       message: error.message,
     });
@@ -30,7 +31,7 @@ exports.getCategories = async (req, res) => {
 };
 
 // =====================================================
-// GET PRODUCT CATEGORIES
+// GET SUB CATEGORIES
 // GET /api/categories/product-categories?categoryId=xxx
 // =====================================================
 
@@ -53,8 +54,9 @@ exports.getProductCategories = async (req, res) => {
       name: 1,
     });
 
-    res.status(200).json({
+    return res.status(200).json({
       success: true,
+      count: categories.length,
       categories,
     });
   } catch (error) {
@@ -63,7 +65,7 @@ exports.getProductCategories = async (req, res) => {
       error
     );
 
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       message: error.message,
     });
@@ -100,40 +102,65 @@ exports.createCategory = async (req, res) => {
     const existingCategory =
       await Category.findOne({
         $or: [
-          { categoryId },
-          { name },
-          { slug },
+          { categoryId: categoryId.trim() },
+          { name: name.trim() },
+          { slug: slug.trim().toLowerCase() },
         ],
       });
 
     if (existingCategory) {
-      return res.status(400).json({
+      return res.status(409).json({
         success: false,
         message:
           "Category ID, name or slug already exists",
       });
     }
 
-    const category = await Category.create({
-      categoryId,
-      name,
-      slug,
-      description,
-      icon,
-      image,
-      parentCategory:
-        parentCategory || null,
-      isActive:
-        isActive !== undefined
-          ? isActive
-          : true,
-      sortOrder:
-        Number(sortOrder) || 0,
-    });
+    if (parentCategory) {
+      const parent =
+        await Category.findById(parentCategory);
 
-    res.status(201).json({
+      if (!parent) {
+        return res.status(400).json({
+          success: false,
+          message: "Parent category not found",
+        });
+      }
+    }
+
+    const category =
+      await Category.create({
+        categoryId: categoryId.trim(),
+
+        name: name.trim(),
+
+        slug: slug.trim().toLowerCase(),
+
+        description:
+          description || "",
+
+        icon:
+          icon || "",
+
+        image:
+          image || "",
+
+        parentCategory:
+          parentCategory || null,
+
+        isActive:
+          isActive !== undefined
+            ? Boolean(isActive)
+            : true,
+
+        sortOrder:
+          Number(sortOrder) || 0,
+      });
+
+    return res.status(201).json({
       success: true,
-      message: "Category created successfully",
+      message:
+        "Category created successfully",
       category,
     });
   } catch (error) {
@@ -142,7 +169,7 @@ exports.createCategory = async (req, res) => {
       error
     );
 
-    res.status(400).json({
+    return res.status(400).json({
       success: false,
       message: error.message,
     });
@@ -167,7 +194,7 @@ exports.getAllCategories = async (req, res) => {
           name: 1,
         });
 
-    res.status(200).json({
+    return res.status(200).json({
       success: true,
       count: categories.length,
       categories,
@@ -178,7 +205,7 @@ exports.getAllCategories = async (req, res) => {
       error
     );
 
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       message: error.message,
     });
