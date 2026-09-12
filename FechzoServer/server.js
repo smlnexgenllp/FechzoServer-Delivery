@@ -217,6 +217,7 @@ const storeAuthRoutes = require("./routes/marketplace/storeAuthRoutes");
 const uploadRoutes = require("./routes/marketplace/uploadRoutes");
 require('./controllers/restaurants/Logcontroller/AutoFinalizeOperatingHoursJob');
 require('./controllers/restaurants/Logcontroller/AutoOpenOperatingHoursJob');
+const adRoutes = require("./routes/marketplace/adsRoutes.js");
 
 // Establish database connection
 connectDB()
@@ -253,6 +254,7 @@ connectDB()
     app.use("/api/delivery-partner",walletRoutes);
     app.use("/api/delivery-partner/orders", deliveryPartnerOrderRoutes);
     // Root route - serves the landing page
+    app.use("/api/ads", adRoutes);
     app.use('/api/stores', storeRoutes);
     app.use("/api/stores/auth", storeAuthRoutes);
     app.use("/api/upload",uploadRoutes);

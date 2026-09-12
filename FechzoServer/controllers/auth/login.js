@@ -1,4 +1,4 @@
-const Restaurant = require('../../models/restaurants/shops/RestaurantDetails');
+  const Restaurant = require('../../models/restaurants/shops/RestaurantDetails');
 const jwt = require('jsonwebtoken');
 const dotenv = require('dotenv');
 
