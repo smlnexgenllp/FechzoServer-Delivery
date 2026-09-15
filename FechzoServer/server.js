@@ -206,6 +206,7 @@ const razorpayRoutes = require('./routes/razorpay/RazorPayRoutes.js')
 const notificationRoutes = require('./routes/restaurants/notificationRoutes');
 const mapsRoutes = require('./routes/maps');
 const walletRoutes=require("./routes/deliverypartner/walletRoutes");
+const marketplaceSearchRoutes = require("./routes/marketplace/searchRoutes");
 // const offerRoutes = require('./routes/offers/offerRoutes');
 // const branchRoutes = require('./routes/branches/branchRoutes');
 // const performanceRoutes = require('./routes/performance/performanceRoutes');
@@ -261,6 +262,11 @@ connectDB()
     app.get('/', (req, res) => {
       res.send("Welcome to Fechzo");
     });
+    app.use(
+  "/api/marketplace/search",
+  marketplaceSearchRoutes
+);
+
     // Start the server only after DB connection is successful
     const PORT = process.env.PORT || 5000;
     server.listen(PORT, () => {
