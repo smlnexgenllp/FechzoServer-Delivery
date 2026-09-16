@@ -218,6 +218,7 @@ const uploadRoutes = require("./routes/marketplace/uploadRoutes");
 require('./controllers/restaurants/Logcontroller/AutoFinalizeOperatingHoursJob');
 require('./controllers/restaurants/Logcontroller/AutoOpenOperatingHoursJob');
 const adRoutes = require("./routes/marketplace/adsRoutes.js");
+const marketplaceRoutes = require("./routes/marketplace/marketplace/marketplaceRoutes");
 
 // Establish database connection
 connectDB()
@@ -259,6 +260,7 @@ connectDB()
     app.use("/api/stores/auth", storeAuthRoutes);
     app.use("/api/upload",uploadRoutes);
     app.use("/api/wishlist", wishlistRoutes);
+    app.use("/api/marketplace", marketplaceRoutes);
     app.get('/', (req, res) => {
       res.send("Welcome to Fechzo");
     });
