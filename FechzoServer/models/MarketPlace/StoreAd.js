@@ -1,5 +1,4 @@
-import mongoose from "mongoose";
-
+const mongoose = require("mongoose");
 const storeAdSchema = new mongoose.Schema(
   {
     title: {
@@ -22,10 +21,12 @@ const storeAdSchema = new mongoose.Schema(
     mobileImage: {
       type: String,
     },
+
     ctaText: {
       type: String,
       default: "Shop Now",
     },
+
     ctaLink: {
       type: String,
       required: true,
@@ -37,7 +38,13 @@ const storeAdSchema = new mongoose.Schema(
     },
     position: {
       type: String,
-      enum: ["home-hero", "home-secondary", "home-sponsored", "home-strip", "category-top"],
+      enum: [
+        "home-hero",
+        "home-secondary",
+        "home-sponsored",
+        "home-strip",
+        "category-top",
+      ],
       required: true,
     },
     categories: [
@@ -77,17 +84,30 @@ const storeAdSchema = new mongoose.Schema(
     discountText: {
       type: String,
     },
-    price: String,
-    originalPrice: String,
+    price: {
+      type: String,
+    },
+    originalPrice: {
+      type: String,
+    },
   },
-  { timestamps: true }
+  {
+    timestamps: true,
+  }
 );
-
 // Indexes
-storeAdSchema.index({ isActive: 1, position: 1, priority: -1 });
-storeAdSchema.index({ startDate: 1, endDate: 1 });
+storeAdSchema.index({
+  isActive: 1,
+  position: 1,
+  priority: -1,
+});
+storeAdSchema.index({
+  startDate: 1,
+  endDate: 1,
+});
 
-// Prevent OverwriteModelError
-const StoreAd = mongoose.models.StoreAd || mongoose.model("StoreAd", storeAdSchema);
+const StoreAd =
+  mongoose.models.StoreAd ||
+  mongoose.model("StoreAd", storeAdSchema);
 
-export default StoreAd;
+module.exports = StoreAd;
