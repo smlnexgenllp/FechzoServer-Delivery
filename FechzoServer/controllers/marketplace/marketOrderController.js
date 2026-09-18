@@ -27,9 +27,16 @@ const createOrder = async (req, res) => {
     } = req.body;
 
     // ---------- Validation ----------
-    if (!userId || !storeId || !storeType || !items?.length || !deliveryAddress) {
+    if (
+      !userId ||
+      !storeId ||
+      !storeType ||
+      !items?.length ||
+      !deliveryAddress
+    ) {
       return res.status(400).json({
-        error: "userId, storeId, storeType, items and deliveryAddress are required",
+        error:
+          "userId, storeId, storeType, items and deliveryAddress are required",
       });
     }
 
@@ -210,7 +217,8 @@ const getOrderById = async (req, res) => {
 const updateOrderStatus = async (req, res) => {
   try {
     const { orderId } = req.params;
-    const { status, trackingId, courier, estimatedDelivery, adminNote } = req.body;
+    const { status, trackingId, courier, estimatedDelivery, adminNote } =
+      req.body;
 
     const allowedStatus = [
       "Confirmed",

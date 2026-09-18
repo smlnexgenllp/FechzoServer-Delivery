@@ -23,10 +23,10 @@ const orderItemSchema = new mongoose.Schema(
     attributes: { type: mongoose.Schema.Types.Mixed, default: {} }, // { color, size }
 
     quantity: { type: Number, required: true, min: 1 },
-    price: { type: Number, required: true, min: 0 },       // selling price at order time
+    price: { type: Number, required: true, min: 0 }, // selling price at order time
     mrp: { type: Number, default: 0 },
   },
-  { _id: false }
+  { _id: false },
 );
 
 /* =====================================================
@@ -47,7 +47,7 @@ const addressSnapshotSchema = new mongoose.Schema(
     phone: String,
     type: String,
   },
-  { _id: false }
+  { _id: false },
 );
 
 /* =====================================================
@@ -180,7 +180,7 @@ const marketOrderSchema = new mongoose.Schema(
   },
   {
     timestamps: true,
-  }
+  },
 );
 
 /* =====================================================
