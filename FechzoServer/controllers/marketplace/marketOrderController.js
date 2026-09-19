@@ -30,7 +30,11 @@ const createOrder = async (req, res) => {
     const cleanId = (value) => {
       if (!value) return null;
       if (typeof value === "object") {
-        return value._id ? String(value._id) : value.id ? String(value.id) : null;
+        return value._id
+          ? String(value._id)
+          : value.id
+          ? String(value.id)
+          : null;
       }
       return String(value);
     };
@@ -39,9 +43,16 @@ const createOrder = async (req, res) => {
     const cleanStoreId = cleanId(storeId);
 
     // ---------- Validation ----------
-    if (!cleanUserId || !cleanStoreId || !storeType || !items?.length || !deliveryAddress) {
+    if (
+      !cleanUserId ||
+      !cleanStoreId ||
+      !storeType ||
+      !items?.length ||
+      !deliveryAddress
+    ) {
       return res.status(400).json({
-        error: "userId, storeId, storeType, items and deliveryAddress are required",
+        error:
+          "userId, storeId, storeType, items and deliveryAddress are required",
       });
     }
 
@@ -139,8 +150,8 @@ const createOrder = async (req, res) => {
     // ---------- Create Order ----------
     const order = await MarketOrder.create({
       orderId: generateOrderId(),
-      user: cleanUserId,       // ✅ cleaned
-      store: cleanStoreId,     // ✅ cleaned
+      user: cleanUserId,
+      store: cleanStoreId,
       storeType,
       items: orderItems,
       deliveryAddress,
@@ -239,7 +250,8 @@ const getOrderById = async (req, res) => {
 const updateOrderStatus = async (req, res) => {
   try {
     const { orderId } = req.params;
-    const { status, trackingId, courier, estimatedDelivery, adminNote } = req.body;
+    const { status, trackingId, courier, estimatedDelivery, adminNote } =
+      req.body;
 
     const allowedStatus = [
       "Confirmed",
