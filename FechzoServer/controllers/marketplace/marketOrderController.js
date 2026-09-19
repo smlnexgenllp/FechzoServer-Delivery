@@ -26,10 +26,29 @@ const createOrder = async (req, res) => {
       customerNote = "",
     } = req.body;
 
+    // ---------- Clean ObjectIds (fixes "[object Object]" error) ----------
+    const cleanId = (value) => {
+      if (!value) return null;
+      if (typeof value === "object") {
+        return value._id ? String(value._id) : value.id ? String(value.id) : null;
+      }
+      return String(value);
+    };
+
+    const cleanUserId = cleanId(userId);
+    const cleanStoreId = cleanId(storeId);
+
     // ---------- Validation ----------
-    if (!userId || !storeId || !storeType || !items?.length || !deliveryAddress) {
+    if (!cleanUserId || !cleanStoreId || !storeType || !items?.length || !deliveryAddress) {
       return res.status(400).json({
         error: "userId, storeId, storeType, items and deliveryAddress are required",
+      });
+    }
+
+    // Must be valid 24-char MongoDB ObjectId
+    if (cleanUserId.length !== 24 || cleanStoreId.length !== 24) {
+      return res.status(400).json({
+        error: "Invalid userId or storeId format",
       });
     }
 
@@ -42,10 +61,15 @@ const createOrder = async (req, res) => {
     let subtotal = 0;
 
     for (const item of items) {
-      const product = await Product.findById(item.productId);
+      const productId = cleanId(item.productId);
+      if (!productId) {
+        return res.status(400).json({ error: "Invalid productId in items" });
+      }
+
+      const product = await Product.findById(productId);
       if (!product || product.isDeleted || !product.isActive) {
         return res.status(400).json({
-          error: `Product not available: ${item.productId}`,
+          error: `Product not available: ${productId}`,
         });
       }
 
@@ -57,30 +81,34 @@ const createOrder = async (req, res) => {
       let image = product.thumbnail || product.images?.[0] || "";
 
       if (item.variantId) {
-        variant = product.variants.id(item.variantId);
+        const variantId = cleanId(item.variantId);
+        variant = product.variants.id(variantId);
+
         if (!variant) {
           return res.status(400).json({
             error: `Variant not found for product ${product.name}`,
           });
         }
+
         if (variant.stock < item.quantity) {
           return res.status(400).json({
             error: `Insufficient stock for ${product.name}`,
           });
         }
+
         price = variant.price;
         mrp = variant.mrp;
         sku = variant.sku;
         attributes = variant.attributes || {};
         image = variant.images?.[0] || image;
       } else {
-        // No variant – use first variant or throw
-        if (product.variants.length > 0) {
+        // Product has variants but none selected
+        if (product.variants && product.variants.length > 0) {
           return res.status(400).json({
             error: `Please select a variant for ${product.name}`,
           });
         }
-        // fallback if product has no variants (rare)
+        // No variants on product (rare)
         price = 0;
         mrp = 0;
       }
@@ -103,7 +131,7 @@ const createOrder = async (req, res) => {
     }
 
     // ---------- Pricing ----------
-    const deliveryCharge = 0; // you can calculate later
+    const deliveryCharge = 0;
     const discount = 0;
     const tax = 0;
     const totalAmount = subtotal + deliveryCharge - discount + tax;
@@ -111,8 +139,8 @@ const createOrder = async (req, res) => {
     // ---------- Create Order ----------
     const order = await MarketOrder.create({
       orderId: generateOrderId(),
-      user: userId,
-      store: storeId,
+      user: cleanUserId,       // ✅ cleaned
+      store: cleanStoreId,     // ✅ cleaned
       storeType,
       items: orderItems,
       deliveryAddress,
@@ -122,13 +150,12 @@ const createOrder = async (req, res) => {
       tax,
       totalAmount,
       paymentMethod,
-      paymentStatus: paymentMethod === "COD" ? "Pending" : "Pending",
+      paymentStatus: "Pending",
       customerNote,
       status: "Placed",
     });
 
-    // Optional: reduce stock here
-    // for (const item of orderItems) { ... }
+    // Optional: reduce stock here later
 
     res.status(201).json({
       message: "Order placed successfully",
@@ -136,7 +163,9 @@ const createOrder = async (req, res) => {
     });
   } catch (error) {
     console.error("Create Market Order Error:", error);
-    res.status(500).json({ error: "Internal server error" });
+    res.status(500).json({
+      error: error.message || "Internal server error",
+    });
   }
 };
 
