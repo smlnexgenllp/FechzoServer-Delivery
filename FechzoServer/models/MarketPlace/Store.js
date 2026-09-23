@@ -1,5 +1,50 @@
 const mongoose = require("mongoose");
 
+const DEFAULT_OPERATING_HOURS = [
+  {
+    day: "monday",
+    open: "09:00",
+    close: "21:00",
+    isClosed: false,
+  },
+  {
+    day: "tuesday",
+    open: "09:00",
+    close: "21:00",
+    isClosed: false,
+  },
+  {
+    day: "wednesday",
+    open: "09:00",
+    close: "21:00",
+    isClosed: false,
+  },
+  {
+    day: "thursday",
+    open: "09:00",
+    close: "21:00",
+    isClosed: false,
+  },
+  {
+    day: "friday",
+    open: "09:00",
+    close: "21:00",
+    isClosed: false,
+  },
+  {
+    day: "saturday",
+    open: "09:00",
+    close: "21:00",
+    isClosed: false,
+  },
+  {
+    day: "sunday",
+    open: "09:00",
+    close: "21:00",
+    isClosed: true,
+  },
+];
+
 const storeSchema = new mongoose.Schema(
   {
     // =========================
@@ -23,7 +68,11 @@ const storeSchema = new mongoose.Schema(
 
     storeType: {
       type: String,
-      enum: ["grocery", "fashion", "electronics"],
+      enum: [
+        "grocery",
+        "fashion",
+        "electronics",
+      ],
       required: true,
       index: true,
     },
@@ -301,44 +350,52 @@ const storeSchema = new mongoose.Schema(
     },
 
     // =========================
-    // OPERATING STATUS
+    // CURRENT OPERATING STATUS
     // =========================
     isOpen: {
       type: Boolean,
       default: false,
     },
 
-    operatingHours: [
-      {
-        day: {
-          type: String,
-          enum: [
-            "monday",
-            "tuesday",
-            "wednesday",
-            "thursday",
-            "friday",
-            "saturday",
-            "sunday",
-          ],
-        },
+    // =========================
+    // WEEKLY OPERATING HOURS
+    // =========================
+    operatingHours: {
+      type: [
+        {
+          day: {
+            type: String,
+            enum: [
+              "monday",
+              "tuesday",
+              "wednesday",
+              "thursday",
+              "friday",
+              "saturday",
+              "sunday",
+            ],
+            required: true,
+          },
 
-        open: {
-          type: String,
-          default: "",
-        },
+          open: {
+            type: String,
+            default: "09:00",
+          },
 
-        close: {
-          type: String,
-          default: "",
-        },
+          close: {
+            type: String,
+            default: "21:00",
+          },
 
-        isClosed: {
-          type: Boolean,
-          default: false,
+          isClosed: {
+            type: Boolean,
+            default: false,
+          },
         },
-      },
-    ],
+      ],
+
+      default: DEFAULT_OPERATING_HOURS,
+    },
 
     // =========================
     // DELIVERY
@@ -384,6 +441,7 @@ const storeSchema = new mongoose.Schema(
       index: true,
     },
   },
+
   {
     timestamps: true,
   }
@@ -429,4 +487,8 @@ storeSchema.index({
 
 module.exports =
   mongoose.models.Store ||
-  mongoose.model("Store", storeSchema, "stores");
+  mongoose.model(
+    "Store",
+    storeSchema,
+    "stores"
+  );

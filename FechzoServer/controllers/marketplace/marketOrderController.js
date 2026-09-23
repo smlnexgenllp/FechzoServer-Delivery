@@ -11,22 +11,17 @@ const generateOrderId = () => {
   return `FM${timestamp}${random}`;
 };
 
-// =====================================================
-// CREATE ORDER
-// =====================================================
 const createOrder = async (req, res) => {
   try {
     const {
       userId,
       storeId,
       storeType,
-      items, // [{ productId, variantId, quantity }]
+      items, 
       deliveryAddress,
       paymentMethod = "COD",
       customerNote = "",
     } = req.body;
-
-    // ---------- Validation ----------
     if (
       !userId ||
       !storeId ||
@@ -133,10 +128,6 @@ const createOrder = async (req, res) => {
       customerNote,
       status: "Placed",
     });
-
-    // Optional: reduce stock here
-    // for (const item of orderItems) { ... }
-
     res.status(201).json({
       message: "Order placed successfully",
       order,
