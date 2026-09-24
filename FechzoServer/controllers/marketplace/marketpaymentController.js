@@ -1,22 +1,27 @@
-const MarketOrder = require("../../models/MarketPlace/MarketOrder"); // adjust path
+const MarketOrder = require("../../models/MarketPlace/MarketOrder");
 const PDFDocument = require("pdfkit");
 const moment = require("moment");
+const mongoose = require("mongoose");
 
 /* =====================================================
-   HELPER: Get Store ID safely
+   HELPER: Get Store ID safely + convert to ObjectId
 ===================================================== */
 const getStoreId = (req) => {
-  // 1. If protectStore middleware is used
-  if (req.store?._id) return req.store._id;
+  let storeId = null;
 
-  // 2. If storeId is sent in query (useful for testing)
-  if (req.query.storeId) return req.query.storeId;
+  if (req.store?._id) storeId = req.store._id;
+  else if (req.query.storeId) storeId = req.query.storeId;
+  else if (req.user?.storeId) storeId = req.user.storeId;
+  else if (req.user?.store?._id) storeId = req.user.store._id;
 
-  // 3. If store info is in the token (req.user)
-  if (req.user?.storeId) return req.user.storeId;
-  if (req.user?.store?._id) return req.user.store._id;
+  if (!storeId) return null;
 
-  return null;
+  // Convert to ObjectId if valid
+  if (mongoose.Types.ObjectId.isValid(storeId)) {
+    return new mongoose.Types.ObjectId(storeId);
+  }
+
+  return storeId; // fallback (string)
 };
 
 /* =====================================================
@@ -47,7 +52,7 @@ const buildPaymentFilter = (storeId, query) => {
     filter.paymentMethod = query.paymentMethod;
   }
 
-  // Date Range (on createdAt)
+  // Date Range
   if (query.fromDate || query.toDate) {
     filter.createdAt = {};
     if (query.fromDate) {
@@ -62,7 +67,7 @@ const buildPaymentFilter = (storeId, query) => {
 };
 
 /* =====================================================
-   1. GET PAYMENTS (List + Search + Filter)
+   1. GET PAYMENTS (List)
 ===================================================== */
 exports.getPayments = async (req, res) => {
   try {
@@ -125,6 +130,9 @@ exports.getPaymentSummary = async (req, res) => {
     }
 
     const filter = buildPaymentFilter(storeId, req.query);
+
+    // Debug log (remove later)
+    console.log("Summary Filter →", JSON.stringify(filter, null, 2));
 
     const summary = await MarketOrder.aggregate([
       { $match: filter },
@@ -205,7 +213,6 @@ exports.downloadPaymentsPDF = async (req, res) => {
       .sort({ createdAt: -1 })
       .lean();
 
-    // Create PDF
     const doc = new PDFDocument({ margin: 40, size: "A4" });
     const filename = `payments_${moment().format("YYYYMMDD_HHmmss")}.pdf`;
 
@@ -268,7 +275,6 @@ exports.downloadPaymentsPDF = async (req, res) => {
 
       y += 16;
 
-      // light separator every 5 rows
       if ((index + 1) % 5 === 0) {
         doc
           .moveTo(startX, y - 2)
@@ -279,7 +285,6 @@ exports.downloadPaymentsPDF = async (req, res) => {
       }
     });
 
-    // Footer summary
     doc.moveDown(2);
     doc.fontSize(10).font("Helvetica-Bold");
     doc.text(`Total Records: ${payments.length}`, { align: "right" });
@@ -292,7 +297,7 @@ exports.downloadPaymentsPDF = async (req, res) => {
 };
 
 /* =====================================================
-   4. UPDATE PAYMENT STATUS (optional - for COD collection)
+   4. UPDATE PAYMENT STATUS (COD)
 ===================================================== */
 exports.updatePaymentStatus = async (req, res) => {
   try {
@@ -324,7 +329,6 @@ exports.updatePaymentStatus = async (req, res) => {
       });
     }
 
-    // Only allow store to mark COD as Paid / Failed
     if (order.paymentMethod === "COD") {
       order.paymentStatus = paymentStatus;
       if (adminNote) order.adminNote = adminNote;
@@ -340,7 +344,6 @@ exports.updatePaymentStatus = async (req, res) => {
       });
     }
 
-    // Online payments should normally be handled by webhook
     return res.status(400).json({
       success: false,
       message: "Online payment status cannot be changed manually",
