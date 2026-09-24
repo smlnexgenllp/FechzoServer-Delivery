@@ -11,16 +11,13 @@ const generateOrderId = () => {
   return `FM${timestamp}${random}`;
 };
 
-// =====================================================
-// CREATE ORDER
-// =====================================================
 const createOrder = async (req, res) => {
   try {
     const {
       userId,
       storeId,
       storeType,
-      items, // [{ productId, variantId, quantity }]
+      items, 
       deliveryAddress,
       paymentMethod = "COD",
       customerNote = "",
