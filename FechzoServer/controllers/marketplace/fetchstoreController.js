@@ -180,11 +180,6 @@ const getStoresByType =
         "i"
       );
     }
-
-    /* --------------------------------------------------------
-       FETCH
-       -------------------------------------------------------- */
-
     const stores =
       await Store.find(filter)
         .select(
@@ -194,41 +189,29 @@ const getStoresByType =
           createdAt: -1,
         })
         .lean();
-
     /* --------------------------------------------------------
        FORMAT
        -------------------------------------------------------- */
-
     const formattedStores =
       stores.map(
         formatPublicStore
       );
-
-    /* --------------------------------------------------------
-       RESPONSE
-       -------------------------------------------------------- */
-
     res.json({
       success: true,
-
       count:
         formattedStores.length,
-
       data:
         formattedStores,
     });
   });
-
 /* ============================================================
    GET ALL APPROVED STORES
    ============================================================ */
-
 const getAllApprovedStores =
   asyncHandler(async (req, res) => {
     const stores =
       await Store.find({
         status: "approved",
-
         isDeleted: false,
       })
         .select(
@@ -238,7 +221,6 @@ const getAllApprovedStores =
           createdAt: -1,
         })
         .lean();
-
     const formattedStores =
       stores.map(
         formatPublicStore
@@ -299,7 +281,7 @@ const getPublicStoreById =
 
 module.exports = {
   getStoresByType,
-  getStoreById,
+  getStoreById:
   getPublicStoreById,
   getAllApprovedStores,
 };
