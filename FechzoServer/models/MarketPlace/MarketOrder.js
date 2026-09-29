@@ -26,7 +26,7 @@ const orderItemSchema = new mongoose.Schema(
     price: { type: Number, required: true, min: 0 }, // selling price at order time
     mrp: { type: Number, default: 0 },
   },
-  { _id: false },
+  { _id: false }
 );
 
 /* =====================================================
@@ -47,7 +47,33 @@ const addressSnapshotSchema = new mongoose.Schema(
     phone: String,
     type: String,
   },
-  { _id: false },
+  { _id: false }
+);
+
+/* =====================================================
+   APPLIED OFFER SNAPSHOT
+===================================================== */
+const appliedOfferSchema = new mongoose.Schema(
+  {
+    offerId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "StoreOffer", // or "StoreOffers" if that is your model name
+      default: null,
+    },
+    title: { type: String, default: "" },
+    offerType: {
+      type: String,
+      enum: ["percentage", "flat", "free_delivery", null],
+      default: null,
+    },
+    discountValue: { type: Number, default: 0 },
+    maxDiscount: { type: Number, default: null },
+    minOrderValue: { type: Number, default: 0 },
+    couponCode: { type: String, default: null },
+    badgeText: { type: String, default: "" },
+    discountAmount: { type: Number, default: 0 }, // actual ₹ applied
+  },
+  { _id: false }
 );
 
 /* =====================================================
@@ -114,9 +140,23 @@ const marketOrderSchema = new mongoose.Schema(
     // =========================
     subtotal: { type: Number, required: true, min: 0 },
     deliveryCharge: { type: Number, default: 0, min: 0 },
-    discount: { type: Number, default: 0, min: 0 },
+    discount: { type: Number, default: 0, min: 0 }, // offer discount amount
     tax: { type: Number, default: 0, min: 0 },
     totalAmount: { type: Number, required: true, min: 0 },
+
+    // =========================
+    // OFFER (SNAPSHOT AT PLACE ORDER)
+    // =========================
+    appliedOffer: {
+      type: appliedOfferSchema,
+      default: () => ({}),
+    },
+    couponCode: {
+      type: String,
+      default: null,
+      uppercase: true,
+      trim: true,
+    },
 
     // =========================
     // PAYMENT
@@ -180,7 +220,7 @@ const marketOrderSchema = new mongoose.Schema(
   },
   {
     timestamps: true,
-  },
+  }
 );
 
 /* =====================================================
@@ -191,6 +231,8 @@ marketOrderSchema.index({ store: 1, status: 1 });
 marketOrderSchema.index({ storeType: 1, status: 1 });
 marketOrderSchema.index({ orderId: 1 });
 marketOrderSchema.index({ paymentStatus: 1 });
+marketOrderSchema.index({ "appliedOffer.offerId": 1 });
+marketOrderSchema.index({ couponCode: 1 });
 
 /* =====================================================
    MODEL
