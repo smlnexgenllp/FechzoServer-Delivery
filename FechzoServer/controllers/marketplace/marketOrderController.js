@@ -1,6 +1,8 @@
 const MarketOrder = require("../../models/MarketPlace/MarketOrder");
 const Product = require("../../models/MarketPlace/Product"); // adjust path
 const User = require("../../models/User/User"); // adjust path
+const StoreOffer = require("../../models/MarketPlace/StoreOffers"); // adjust path
+const mongoose = require("mongoose");
 
 // =====================================================
 // GENERATE ORDER ID
@@ -11,30 +13,68 @@ const generateOrderId = () => {
   return `FM${timestamp}${random}`;
 };
 
+// =====================================================
+// HELPERS
+// =====================================================
+const cleanId = (value) => {
+  if (!value) return null;
+  if (typeof value === "object") {
+    return value._id
+      ? String(value._id)
+      : value.id
+      ? String(value.id)
+      : null;
+  }
+  return String(value);
+};
+
+const calculateOfferDiscount = (offer, subtotal) => {
+  if (!offer || subtotal <= 0) {
+    return { discountAmount: 0, freeDelivery: false };
+  }
+
+  if (subtotal < (Number(offer.minOrderValue) || 0)) {
+    return { discountAmount: 0, freeDelivery: false };
+  }
+
+  if (offer.offerType === "free_delivery") {
+    return { discountAmount: 0, freeDelivery: true };
+  }
+
+  let discountAmount = 0;
+
+  if (offer.offerType === "percentage") {
+    discountAmount = (subtotal * Number(offer.discountValue || 0)) / 100;
+    if (offer.maxDiscount != null) {
+      discountAmount = Math.min(discountAmount, Number(offer.maxDiscount));
+    }
+  } else if (offer.offerType === "flat") {
+    discountAmount = Number(offer.discountValue) || 0;
+  }
+
+  discountAmount = Math.min(discountAmount, subtotal);
+  discountAmount = Math.round(discountAmount * 100) / 100;
+
+  return { discountAmount, freeDelivery: false };
+};
+
+// =====================================================
+// CREATE ORDER
+// =====================================================
 const createOrder = async (req, res) => {
   try {
     const {
       userId,
       storeId,
       storeType,
-      items, 
+      items,
       deliveryAddress,
       paymentMethod = "COD",
       customerNote = "",
+      // Offer fields from frontend (optional – server re-validates)
+      appliedOfferId,
+      couponCode,
     } = req.body;
-
-    // ---------- Clean ObjectIds (fixes "[object Object]" error) ----------
-    const cleanId = (value) => {
-      if (!value) return null;
-      if (typeof value === "object") {
-        return value._id
-          ? String(value._id)
-          : value.id
-          ? String(value.id)
-          : null;
-      }
-      return String(value);
-    };
 
     const cleanUserId = cleanId(userId);
     const cleanStoreId = cleanId(storeId);
@@ -53,7 +93,6 @@ const createOrder = async (req, res) => {
       });
     }
 
-    // Must be valid 24-char MongoDB ObjectId
     if (cleanUserId.length !== 24 || cleanStoreId.length !== 24) {
       return res.status(400).json({
         error: "Invalid userId or storeId format",
@@ -110,13 +149,11 @@ const createOrder = async (req, res) => {
         attributes = variant.attributes || {};
         image = variant.images?.[0] || image;
       } else {
-        // Product has variants but none selected
         if (product.variants && product.variants.length > 0) {
           return res.status(400).json({
             error: `Please select a variant for ${product.name}`,
           });
         }
-        // No variants on product (rare)
         price = 0;
         mrp = 0;
       }
@@ -138,11 +175,118 @@ const createOrder = async (req, res) => {
       });
     }
 
-    // ---------- Pricing ----------
-    const deliveryCharge = 0;
-    const discount = 0;
+    // ---------- OFFER: validate & calculate (server-side) ----------
+    let discount = 0;
+    let deliveryCharge = 0;
+    let appliedOfferSnapshot = {
+      offerId: null,
+      title: "",
+      offerType: null,
+      discountValue: 0,
+      maxDiscount: null,
+      minOrderValue: 0,
+      couponCode: null,
+      badgeText: "",
+      discountAmount: 0,
+    };
+
+    const now = new Date();
+    let offerDoc = null;
+
+    // 1) By appliedOfferId
+    if (appliedOfferId && mongoose.Types.ObjectId.isValid(String(appliedOfferId))) {
+      offerDoc = await StoreOffer.findOne({
+        _id: appliedOfferId,
+        storeId: cleanStoreId,
+        isActive: true,
+        startDate: { $lte: now },
+        endDate: { $gte: now },
+      });
+    }
+
+    // 2) By coupon code
+    if (!offerDoc && couponCode) {
+      offerDoc = await StoreOffer.findOne({
+        storeId: cleanStoreId,
+        isCoupon: true,
+        couponCode: String(couponCode).toUpperCase().trim(),
+        isActive: true,
+        startDate: { $lte: now },
+        endDate: { $gte: now },
+      });
+    }
+
+    // 3) Best auto offer (no coupon) for this store
+    if (!offerDoc) {
+      const autoOffers = await StoreOffer.find({
+        storeId: cleanStoreId,
+        isActive: true,
+        isCoupon: false,
+        startDate: { $lte: now },
+        endDate: { $gte: now },
+      }).lean();
+
+      let best = null;
+      let bestDiscount = 0;
+
+      for (const o of autoOffers) {
+        const { discountAmount } = calculateOfferDiscount(o, subtotal);
+        if (discountAmount > bestDiscount) {
+          bestDiscount = discountAmount;
+          best = o;
+        }
+      }
+
+      if (best) {
+        offerDoc = best;
+      }
+    }
+
+    // Usage limit
+    if (
+      offerDoc &&
+      offerDoc.usageLimit != null &&
+      Number(offerDoc.usedCount || 0) >= Number(offerDoc.usageLimit)
+    ) {
+      offerDoc = null;
+    }
+
+    if (offerDoc) {
+      const { discountAmount, freeDelivery } = calculateOfferDiscount(
+        offerDoc,
+        subtotal
+      );
+
+      discount = discountAmount;
+      if (freeDelivery) {
+        deliveryCharge = 0;
+      }
+
+      appliedOfferSnapshot = {
+        offerId: offerDoc._id,
+        title: offerDoc.title || "",
+        offerType: offerDoc.offerType || null,
+        discountValue: Number(offerDoc.discountValue) || 0,
+        maxDiscount:
+          offerDoc.maxDiscount != null ? Number(offerDoc.maxDiscount) : null,
+        minOrderValue: Number(offerDoc.minOrderValue) || 0,
+        couponCode: offerDoc.couponCode || null,
+        badgeText: offerDoc.badgeText || "",
+        discountAmount: discount,
+      };
+
+      // Increment used count
+      await StoreOffer.updateOne(
+        { _id: offerDoc._id },
+        { $inc: { usedCount: 1 } }
+      );
+    }
+
     const tax = 0;
-    const totalAmount = subtotal + deliveryCharge - discount + tax;
+    const totalAmount = Math.max(
+      0,
+      subtotal + deliveryCharge - discount + tax
+    );
 
     // ---------- Create Order ----------
     const order = await MarketOrder.create({
@@ -161,9 +305,9 @@ const createOrder = async (req, res) => {
       paymentStatus: "Pending",
       customerNote,
       status: "Placed",
+      appliedOffer: appliedOfferSnapshot,
+      couponCode: appliedOfferSnapshot.couponCode || null,
     });
-
-    // Optional: reduce stock here later
 
     res.status(201).json({
       message: "Order placed successfully",
@@ -281,7 +425,7 @@ const updateOrderStatus = async (req, res) => {
 
     if (status === "Cancelled") {
       order.cancelledAt = new Date();
-      order.cancelledBy = "store"; // or admin
+      order.cancelledBy = "store";
     }
 
     await order.save();
@@ -312,7 +456,6 @@ const cancelOrder = async (req, res) => {
       return res.status(404).json({ error: "Order not found" });
     }
 
-    // Only allow cancel if still early
     if (!["Placed", "Confirmed"].includes(order.status)) {
       return res.status(400).json({
         error: "Order cannot be cancelled at this stage",
