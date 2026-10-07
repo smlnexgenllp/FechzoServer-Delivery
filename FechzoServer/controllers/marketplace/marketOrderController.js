@@ -362,39 +362,120 @@ const getUserOrders = async (req, res) => {
 
 // =====================================================
 // GET SINGLE ORDER
+// Supports MongoDB _id + custom orderId
+// =====================================================
+// =====================================================
+// GET SINGLE ORDER
+// Supports MongoDB _id AND custom orderId (FMxxxxxxxxxxxx)
 // =====================================================
 const getOrderById = async (req, res) => {
   try {
     const { orderId } = req.params;
 
-    const order = await MarketOrder.findOne({
-      $or: [{ _id: orderId }, { orderId: orderId }],
-    })
-      .populate("store", "name logo phone address")
-      .populate("user", "name email phone")
-      .lean();
-
-    if (!order) {
-      return res.status(404).json({ error: "Order not found" });
+    if (!orderId) {
+      return res.status(400).json({
+        success: false,
+        error: "Order ID is required",
+      });
     }
 
-    res.status(200).json({ order });
+    let order = null;
+
+    // ---------------------------------------------------
+    // First try MongoDB _id only when it is a valid ObjectId
+    // ---------------------------------------------------
+    if (mongoose.Types.ObjectId.isValid(orderId)) {
+      order = await MarketOrder.findById(orderId)
+        .populate("store", "name storeName logo phone address")
+        .populate("user", "name email phone")
+        .lean();
+    }
+
+    // ---------------------------------------------------
+    // If not found, search using custom orderId
+    // Example: FM851082766322
+    // ---------------------------------------------------
+    if (!order) {
+      order = await MarketOrder.findOne({
+        orderId: String(orderId),
+      })
+        .populate("store", "name storeName logo phone address")
+        .populate("user", "name email phone")
+        .lean();
+    }
+
+    // ---------------------------------------------------
+    // Order not found
+    // ---------------------------------------------------
+    if (!order) {
+      return res.status(404).json({
+        success: false,
+        error: "Order not found",
+      });
+    }
+
+    // ---------------------------------------------------
+    // Success
+    // ---------------------------------------------------
+    return res.status(200).json({
+      success: true,
+      order,
+    });
   } catch (error) {
     console.error("Get Order Error:", error);
-    res.status(500).json({ error: "Internal server error" });
+
+    return res.status(500).json({
+      success: false,
+      error: error.message || "Internal server error",
+    });
   }
 };
 
 // =====================================================
-// UPDATE ORDER STATUS (Store / Admin)
+// UPDATE ORDER STATUS
+// Store / Admin
+// =====================================================
+// =====================================================
+// UPDATE ORDER STATUS
+// Store / Admin
 // =====================================================
 const updateOrderStatus = async (req, res) => {
   try {
     const { orderId } = req.params;
-    const { status, trackingId, courier, estimatedDelivery, adminNote } =
-      req.body;
 
-    const allowedStatus = [
+    const {
+      status,
+      trackingId,
+      courier,
+      estimatedDelivery,
+      adminNote,
+    } = req.body;
+
+    console.log("=================================");
+    console.log("UPDATE ORDER STATUS");
+    console.log("Order ID:", orderId);
+    console.log("Status:", status);
+    console.log("Body:", req.body);
+    console.log("=================================");
+
+    // ---------------------------------------------
+    // VALIDATION
+    // ---------------------------------------------
+
+    if (!orderId) {
+      return res.status(400).json({
+        error: "Order ID is required",
+      });
+    }
+
+    if (!status) {
+      return res.status(400).json({
+        error: "Status is required",
+      });
+    }
+
+    const allowedStatuses = [
+      "Placed",
       "Confirmed",
       "Packed",
       "Shipped",
@@ -405,38 +486,129 @@ const updateOrderStatus = async (req, res) => {
       "Refunded",
     ];
 
-    if (status && !allowedStatus.includes(status)) {
-      return res.status(400).json({ error: "Invalid status" });
+    if (!allowedStatuses.includes(status)) {
+      return res.status(400).json({
+        error: `Invalid order status: ${status}`,
+      });
     }
 
+    // ---------------------------------------------
+    // FIND ORDER
+    // Supports both Mongo _id and custom orderId
+    // ---------------------------------------------
+
+    const query = [];
+
+    if (mongoose.Types.ObjectId.isValid(orderId)) {
+      query.push({
+        _id: orderId,
+      });
+    }
+
+    query.push({
+      orderId: orderId,
+    });
+
     const order = await MarketOrder.findOne({
-      $or: [{ _id: orderId }, { orderId: orderId }],
+      $or: query,
     });
 
     if (!order) {
-      return res.status(404).json({ error: "Order not found" });
+      return res.status(404).json({
+        error: "Order not found",
+      });
     }
 
-    if (status) order.status = status;
-    if (trackingId) order.trackingId = trackingId;
-    if (courier) order.courier = courier;
-    if (estimatedDelivery) order.estimatedDelivery = estimatedDelivery;
-    if (adminNote) order.adminNote = adminNote;
+    // ---------------------------------------------
+    // UPDATE STATUS
+    // ---------------------------------------------
+
+    order.status = status;
+
+    // ---------------------------------------------
+    // OPTIONAL FIELDS
+    // ---------------------------------------------
+
+    if (trackingId !== undefined) {
+      order.trackingId = trackingId;
+    }
+
+    if (courier !== undefined) {
+      order.courier = courier;
+    }
+
+    if (estimatedDelivery !== undefined) {
+      order.estimatedDelivery =
+        estimatedDelivery;
+    }
+
+    if (adminNote !== undefined) {
+      order.adminNote = adminNote;
+    }
+
+    // ---------------------------------------------
+    // STATUS TIMESTAMPS
+    // ---------------------------------------------
+
+    if (status === "Confirmed") {
+      order.confirmedAt = new Date();
+    }
+
+    if (status === "Packed") {
+      order.packedAt = new Date();
+    }
+
+    if (status === "Shipped") {
+      order.shippedAt = new Date();
+    }
+
+    if (status === "Out for Delivery") {
+      order.outForDeliveryAt = new Date();
+    }
+
+    if (status === "Delivered") {
+      order.deliveredAt = new Date();
+    }
 
     if (status === "Cancelled") {
       order.cancelledAt = new Date();
-      order.cancelledBy = "store";
     }
+
+    if (status === "Returned") {
+      order.returnedAt = new Date();
+    }
+
+    // ---------------------------------------------
+    // SAVE
+    // ---------------------------------------------
 
     await order.save();
 
-    res.status(200).json({
-      message: "Order status updated",
+    console.log(
+      `Order ${order.orderId} updated to ${status}`
+    );
+
+    // ---------------------------------------------
+    // RESPONSE
+    // ---------------------------------------------
+
+    return res.status(200).json({
+      success: true,
+      message: `Order status updated to ${status}`,
       order,
     });
+
   } catch (error) {
-    console.error("Update Order Status Error:", error);
-    res.status(500).json({ error: "Internal server error" });
+    console.error(
+      "Update Order Status Error:",
+      error
+    );
+
+    return res.status(500).json({
+      error:
+        error.message ||
+        "Internal server error",
+    });
   }
 };
 
