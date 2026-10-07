@@ -1,6 +1,5 @@
 const asyncHandler = require("express-async-handler");
 const Store = require("../../models/MarketPlace/Store");
-
 const formatPublicStore = (store) => {
   if (!store) {
     return null;
@@ -26,9 +25,6 @@ const formatPublicStore = (store) => {
           coordinates: [0, 0],
         },
     },
-    /* ========================================================
-       MEDIA
-       ======================================================== */
     logo: store.logo || null,
     banner: store.banner || null,
     storefrontImage:
@@ -146,9 +142,6 @@ const getAllApprovedStores =
         formattedStores,
     });
   });
-/* ============================================================
-   GET PUBLIC STORE BY ID
-   ============================================================ */
 const getPublicStoreById =
   asyncHandler(async (req, res) => {
     const store =
