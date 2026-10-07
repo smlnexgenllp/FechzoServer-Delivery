@@ -71,7 +71,7 @@ const storeSchema = new mongoose.Schema(
       enum: [
         "grocery",
         "fashion",
-        "electronics",
+        "electronic",
       ],
       required: true,
       index: true,
